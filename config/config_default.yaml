@@ -46,10 +46,10 @@ image_processing:
 game_bot:
   # ROI bounding box offsets from character center
   # Balance between CPU usage and mob detection coverage. Reference: Melee 100-200, Ranged 300-500
-  roi_x_offset_l_width: 300
-  roi_x_offset_r_width: 300
-  roi_y_offset_t_high: 150
-  roi_y_offset_b_high: 40
+  roi_x_offset_l_width: 500
+  roi_x_offset_r_width: 500
+  roi_y_offset_t_high: 200
+  roi_y_offset_b_high: 60
 
 auto_control_config:
   # Mob search toggle: True/False

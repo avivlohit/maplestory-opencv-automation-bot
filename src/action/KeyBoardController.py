@@ -126,7 +126,7 @@ class KeyBoard:
                 # Attack in progress, skip duplicate command
                 return
             self._status_attack = True
-            threading.Thread(target=self._aoe_attack_command,daemon=True).start() 
+            threading.Thread(target=self._aoe_attack_command, daemon=True).start()
 
 
     def _night_lord_att_command(self, direction):
