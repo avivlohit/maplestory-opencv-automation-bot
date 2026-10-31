@@ -6,8 +6,8 @@ import logging
 import src.utils.logger as logger
 
 logger.setup_logging()
-# 手動觸發不同層級的日誌
-logging.debug("這是一則 Debug 訊息（用於細部除錯）")
-logging.info("這是一則 Info 訊息（代表程式正常運行）")
-logging.warning("這是一則 Warning 訊息（可能有潛在問題）")
-logging.error("這是一則 Error 訊息（發生了錯誤！）")
+# Manually trigger different log levels
+logging.debug("This is a Debug message (detailed debugging)")
+logging.info("This is an Info message (normal program operation)")
+logging.warning("This is a Warning message (potential issue detected)")
+logging.error("This is an Error message (error occurred!)")

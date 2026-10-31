@@ -3,8 +3,7 @@ import logging
 from config.config_loader import config
 import time
 '''
-命令分派器
-
+Command Dispatcher
 '''
 class ActionHandler:
     def __init__(self):
@@ -15,27 +14,27 @@ class ActionHandler:
         #Instance
         self.keyboard = kb.KeyBoard()
         #Flag
-        self.is_Night_Lord = config.get("player_setting.auto_control_config.is_Night_Lord") #<-- 是否為鏢賊
+        self.is_Night_Lord = config.get("player_setting.auto_control_config.is_Night_Lord") # <-- Is Night Lord / Assassin class
 
     def execute_behavior(self, new_state, target_info=None):
         """
-        負責以狀態變更而進行的指令
+        Executes commands triggered by state changes.
         args:
-            new_state (str): 新的狀態
-            target_info (dict):  {"name": mob, "distance": distance, "direction": direction}
+            new_state (str): New state name
+            target_info (dict): {"name": mob, "distance": distance, "direction": direction}
         """
-        # 把持續狀態轉脈衝狀態，防止重複觸發
+        # Convert continuous state to pulse to prevent duplicate triggers
         if self.current_state != new_state or self.current_info != target_info:
             self.current_state = new_state
             self.current_info = target_info
 
 
-        # 判定"攻擊"狀態
+        # Handle ATTACK state
         if self.current_state == "ATTACK":
             '''
-            Note: 判斷順序 -> 是否 AOE -> 跳打|普通攻擊 
+            Note: Priority -> AOE -> Jump Attack | Normal Attack
             '''
-            # 停止移動
+            # Stop moving
             direction = self.current_info.get("direction")
             self.keyboard.stop_move()
 
@@ -48,7 +47,7 @@ class ActionHandler:
                 self.keyboard.enable_attack(direction)
 
         # ====
-        # "爬繩"狀態命令
+        # ROPE State Commands
         # ====
         elif self.current_state == "ROPE" and self.current_info:
 
@@ -78,7 +77,7 @@ class ActionHandler:
 
 
         # ====
-        # "攀爬"的狀態命令
+        # CLIMB State Commands
         # ====
         elif self.current_state == "CLIMB" :
             direction = self.current_info.get("direction")
@@ -88,7 +87,7 @@ class ActionHandler:
                 self.keyboard.climb_down()
 
         # ====
-        # "持續位移"的狀態命令
+        # Continuous Movement Commands (MOVE)
         # ====
         elif self.current_state == "MOVE" and self.current_info:
             direction = self.current_info.get("direction")
@@ -102,7 +101,7 @@ class ActionHandler:
 
 
         # ====
-        # "跳躍"的狀態命令
+        # JUMP State Commands
         # ====
         elif self.current_state == "JUMP":   
             direction = self.current_info.get("direction")
@@ -112,37 +111,37 @@ class ActionHandler:
             elif direction == "RIGHT":
                 self.keyboard.jump_right()
 
-            elif direction =="NONE":  # <- 給平台移動時遇到障礙物的跳躍
+            elif direction =="NONE":  # <- Jump over obstacles during platform movement
                 self.keyboard.enable_jump()
 
-            elif direction == "DOWN": # <- 向下跳
+            elif direction == "DOWN": # <- Jump down
                 self.keyboard.jump_down()
 
         # ====
-        # "短距離位移"的狀態命令
+        # Short Distance Movement Commands (SMALL_MOVE)
         # ====
         elif self.current_state == "SMALL_MOVE":
             direction = self.current_info.get("direction")
             if direction == "M2LEFT":
-                self.keyboard.move_left_to_jump()# <- 跳抓狀態的短距離左側移動
+                self.keyboard.move_left_to_jump()# <- Short distance left move for jump-grab
             elif direction == "M2RIGHT":
-                self.keyboard.move_right_to_jump()# <- 跳抓狀態的短距離右側移動
+                self.keyboard.move_right_to_jump()# <- Short distance right move for jump-grab
 
 
         # ====
-        # "跳爬+跳抓"的狀態命令
+        # Jump-Grab State Commands (JUMP_GRAB)
         # ====
         elif self.current_state == "JUMP_GRAB":
             direction = self.current_info.get("direction")
             self.keyboard.stop_move()
-            if direction == "LEFT": # <- 向左跳抓
+            if direction == "LEFT": # <- Jump grab left
 
                 self.keyboard.jump_left_grab()
-            elif direction == "RIGHT": # <- 向右跳抓
+            elif direction == "RIGHT": # <- Jump grab right
 
                 self.keyboard.jump_right_grab()
 
-            elif direction == "UP": # <- 向上跳抓
+            elif direction == "UP": # <- Jump grab up
                 self.keyboard.jump_up_grab()
 
 
@@ -152,23 +151,21 @@ class ActionHandler:
             command = self.current_info.get("command")
             if command == "STOP_MOVE":
 
-                # 停止移動
+                # Stop moving
                 self.keyboard.stop_move()
             if command == "RELEASE_ALL":
-                # 釋放所有熟鍵
+                # Release all keys
                 self.keyboard.stop_move()
                 self.keyboard.release_all()
 
-        # 判定"治癒"狀態
+        # Handle HEAL state
         elif self.current_state.startswith("HEAL") and self.current_info:
-            #健康修復狀態
+            # Health recovery state
             key = self.current_info.get("key")
             if key:
                 self.keyboard.enable_use_item(key)
             else:
-                logging.info(f"{self.current_state} 觸發，但該該處發值還沒設定按鍵")
+                logging.info(f"{self.current_state} triggered, but no hotkey is configured for this threshold")
                 pass
         else:
             self.keyboard.enable_pick_up()
-
-

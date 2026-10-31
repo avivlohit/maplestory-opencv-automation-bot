@@ -6,10 +6,10 @@ import threading
 import random
 class KeyBoard:
     def __init__(self):
-        #捕捉與綁定滑鼠
+        # Capture and bind devices
         interception.auto_capture_devices(keyboard=True, mouse=True)
 
-        # 追蹤目前「實際按著」的按鍵，release_all 靠這個集合來釋放，不再寫死固定清單
+        # Track keys currently held down; release_all uses this set dynamically rather than a fixed list
         self._pressed_keys = set()
         self._pressed_keys_lock = threading.Lock()
 
@@ -64,10 +64,10 @@ class KeyBoard:
         self.pick_up_key = config.get("keyboard.pick_up")
         self.jump_key = config.get("keyboard.jump")
         #action logging
-        self._current_move = None # <- 紀錄目前移動指令
+        self._current_move = None # <- Record current movement command
 
     ''' 
-    底層按鍵包裝：所有 key_down / key_up 都經過這裡，統一追蹤按下狀態 ， 也可統一釋放
+    Low-level key wrapper: All key_down / key_up pass through here to track pressed state and enable unified release.
     '''
 
     def _key_down(self, key):
@@ -80,7 +80,7 @@ class KeyBoard:
         with self._pressed_keys_lock:
             self._pressed_keys.discard(key)
 
-    ''' 攻擊行為 '''
+    ''' Attack Behaviors '''
     def _attack_command(self, direction):
         try: 
             key = self.right_key if direction == "RIGHT" else self.left_key
@@ -90,7 +90,7 @@ class KeyBoard:
             self._key_down(self.attack_key)
             time.sleep(0.3)
         except Exception as e:
-            logging.error(f"攻擊行為發生錯誤:{e}")
+            logging.error(f"Error during attack action: {e}")
             
         finally:
             self._key_up(self.attack_key)
@@ -99,10 +99,10 @@ class KeyBoard:
 
 
     def enable_attack(self,direction):
-        '''普通攻擊'''
+        '''Normal attack'''
         with self._attack_lock:
             if self._status_attack:
-                #攻擊還在發生，不再傳輸攻擊指令
+                # Attack in progress, skip duplicate command
                 return
             self._status_attack = True
             threading.Thread(target=self._attack_command,args=(direction,),daemon=True).start() 
@@ -112,7 +112,7 @@ class KeyBoard:
             self._key_down(self.aoe_attack_key)
             time.sleep(0.3)
         except Exception as e:
-            logging.error(f"攻擊行為發生錯誤:{e}")
+            logging.error(f"Error during attack action: {e}")
             
         finally:
             self._key_up(self.aoe_attack_key)
@@ -120,10 +120,10 @@ class KeyBoard:
                 self._status_attack = False
 
     def enable_aoe_attack(self):
-        '''範圍攻擊'''
+        '''AOE attack'''
         with self._attack_lock:
             if self._status_attack:
-                #攻擊還在發生，不再傳輸攻擊指令
+                # Attack in progress, skip duplicate command
                 return
             self._status_attack = True
             threading.Thread(target=self._aoe_attack_command,daemon=True).start() 
@@ -142,7 +142,7 @@ class KeyBoard:
             self._key_down(self.attack_key)
             time.sleep(0.3)
         except Exception as e:
-            logging.error(f"攻擊行為發生錯誤:{e}")
+            logging.error(f"Error during attack action: {e}")
             
         finally:
             self._key_up(self.attack_key)
@@ -152,27 +152,27 @@ class KeyBoard:
 
     def enable_night_lord_attack(self,direction):
         '''
-        鏢賊/跳打攻擊
+        Night Lord / Jump attack
         '''
         with self._night_lord_attack_lock:
             if self._status_night_lord_attack:
-                #攻擊還在發生，不再傳輸攻擊指令
+                # Attack in progress, skip duplicate command
                 return
             self._status_night_lord_attack = True
             threading.Thread(target=self._night_lord_att_command,args=(direction,),daemon=True).start()
             
-    ''' 移動行為 '''
+    ''' Movement Behaviors '''
 
     def _press_direction(self, direction):
         """
-        控制所有左右方向鍵之"按下"動作，防止互搶
+        Controls key down for left/right direction keys with mutual exclusion
         """
         with self._move_lock:
             self._press_direction_locked(direction)
 
     def _press_direction_locked(self, direction):
         """
-        左右鍵按下的鎖
+        Locked helper for pressing direction keys
         """
         if self._current_move == direction:
             return
@@ -186,18 +186,18 @@ class KeyBoard:
         self._current_move = direction
 
     def _release_direction(self):
-        """控制所有左右方向鍵之"放開"動作，防止互搶"""
+        """Controls release for left/right direction keys with mutual exclusion"""
         with self._move_lock:
             self._release_direction_locked()
 
     def _release_direction_locked(self):
-        """左右鍵放開的鎖"""
+        """Locked helper for releasing direction keys"""
         if self._current_move is not None:
             try:
                 self._key_up(self.left_key)
                 self._key_up(self.right_key)
             except Exception as e:
-                logging.error(f"釋放移動發生錯誤:{e}")
+                logging.error(f"Error releasing movement keys: {e}")
             finally:
                 self._current_move = None
 
@@ -217,7 +217,7 @@ class KeyBoard:
                 self._status_jump = False
 
     def enable_jump(self,duration=0.1):
-        '''動作: 單純跳躍'''
+        '''Action: Simple jump'''
         with self._jump_lock:
             if self._status_jump:
                 return
@@ -291,18 +291,18 @@ class KeyBoard:
             self._status_left = True
         threading.Thread(target=self._left_command,args=(duration,), daemon=True).start()
 
-    '''垂直移動'''
-    #先這樣，以後慢慢改
+    '''Vertical Movement'''
+    # Temporary implementation, to be refined
     
     def grab_rope_to_left(self):
-        '''向左跳抓繩子'''
+        '''Jump left to grab rope'''
         self.enable_left()
         time.sleep(0.03)
         self.enable_jump()
         self.enable_up(duration=0.5)
 
     def grab_rope_to_right(self):
-        '''向右跳抓繩子'''
+        '''Jump right to grab rope'''
         self.enable_right()
         time.sleep(0.03)
         self.enable_jump()
@@ -311,12 +311,12 @@ class KeyBoard:
     def _move_down_right_command(self, duration):
         with self._move_lock:
             try:
-                self._press_direction_locked("RIGHT")   # 先給右鍵一點時間讓角色轉向/移動一小步
+                self._press_direction_locked("RIGHT")   # Allow character brief step to face right
                 time.sleep(0.03)
-                self._key_down(self.down_key)             # 再按下「下」，觸發下滑抓繩
+                self._key_down(self.down_key)             # Press down to slide down and grab rope
                 time.sleep(duration)
             except Exception as e:
-                logging.error(f"下滑動作發生錯誤:{e}")
+                logging.error(f"Error during slide down action: {e}")
             finally:
                 self._key_up(self.down_key)
                 self._release_direction_locked()
@@ -324,7 +324,7 @@ class KeyBoard:
             self._status_move_down_right = False
 
     def move_down_right(self, duration=0.5):
-        '''向右下移動'''
+        '''Move down-right'''
         with self._move_down_right_lock:
             if self._status_move_down_right:
                 return
@@ -334,12 +334,12 @@ class KeyBoard:
     def _move_down_left_command(self, duration):
         with self._move_lock:
             try:
-                self._press_direction_locked("LEFT")    # 先給左鍵一點時間讓角色轉向/移動一小步
+                self._press_direction_locked("LEFT")    # Allow character brief step to face left
                 time.sleep(0.03)
-                self._key_down(self.down_key)             # 再按下「下」，觸發下滑抓繩
+                self._key_down(self.down_key)             # Press down to slide down and grab rope
                 time.sleep(duration)
             except Exception as e:
-                logging.error(f"下滑動作發生錯誤:{e}")
+                logging.error(f"Error during slide down action: {e}")
             finally:
                 self._key_up(self.down_key)
                 self._release_direction_locked()
@@ -347,7 +347,7 @@ class KeyBoard:
             self._status_move_down_left = False
 
     def move_down_left(self, duration=0.5):
-        '''向左下移動'''
+        '''Move down-left'''
         with self._move_down_left_lock:
             if self._status_move_down_left:
                 return
@@ -355,25 +355,25 @@ class KeyBoard:
         threading.Thread(target=self._move_down_left_command, args=(duration,), daemon=True).start()
 
     #======
-    # 跳抓
+    # Jump Grab
     #=====
 
     def jump_left_grab_command(self, duration, delay):
 
-        with self._move_lock:               # 整段動作期間，別人動不了方向鍵，避免跟 MOVE/其他複合動作交錯
+        with self._move_lock:               # Lock movement during action to prevent interference with other commands
             try:
                 self._press_direction_locked("LEFT")
-                time.sleep(delay)          # 微小間隔，讓方向鍵先生效，才能觸發跳躍轉向
+                time.sleep(delay)          # Small delay so direction key registers before jump
                 self._key_down(self.jump_key)
                 time.sleep(duration)
                 self._key_down(self.up_key)
             except Exception as e:
-                logging.error(f"左跳動作發生錯誤:{e}")
+                logging.error(f"Error during jump left action: {e}")
             finally:
                 self._key_up(self.jump_key)
-                time.sleep(1)  # <- 測試 按久一點 防止被改向
-                self._release_direction_locked()   # 放開左鍵，同時同步 _current_move = None
-                time.sleep(0.2)             # 等待跳躍動作結束 
+                time.sleep(1)  # Hold longer to maintain direction
+                self._release_direction_locked()   # Release left key and reset _current_move = None
+                time.sleep(0.2)             # Wait for jump completion
                 self._key_down(self.up_key)
         with self._jump_left_grab_lock:
             self._status_jump_left_grab = False
@@ -381,7 +381,7 @@ class KeyBoard:
     def jump_left_grab(self, duration=0.02, delay=0.02):
 
         with self._jump_left_grab_lock:
-            self.stop_move()  #<== 停止移動
+            self.stop_move()  # Stop movement
             if self._status_jump_left_grab:
                 return
             self._status_jump_left_grab = True
@@ -389,20 +389,20 @@ class KeyBoard:
 
     def jump_right_grab_command(self, duration, delay):
 
-        with self._move_lock:               # 整段動作期間，別人動不了方向鍵，避免跟 MOVE/其他複合動作交錯
+        with self._move_lock:               # Lock movement during action to prevent interference with other commands
             try:
                 self._press_direction_locked("RIGHT")
-                time.sleep(delay)          # 微小間隔，讓方向鍵先生效，才能觸發跳躍轉向
+                time.sleep(delay)          # Small delay so direction key registers before jump
                 self._key_down(self.jump_key)
                 time.sleep(duration)
                 self._key_down(self.up_key)
             except Exception as e:
-                logging.error(f"右跳動作發生錯誤:{e}")
+                logging.error(f"Error during jump right action: {e}")
             finally:
                 self._key_up(self.jump_key)
-                time.sleep(1) # <- 測試 按久一點 防止被改向
-                self._release_direction_locked()   # 放開右鍵，同時同步 _current_move = None
-                time.sleep(0.2)             # 等待跳躍動作結束 
+                time.sleep(1) # Hold longer to maintain direction
+                self._release_direction_locked()   # Release right key and reset _current_move = None
+                time.sleep(0.2)             # Wait for jump completion
                 self._key_down(self.up_key)
         with self._jump_right_grab_lock:
             self._status_jump_right_grab = False
@@ -410,26 +410,26 @@ class KeyBoard:
     def jump_right_grab(self, duration=0.02, delay=0.02):
 
         with self._jump_right_grab_lock:
-            self.stop_move()  #<== 停止移動
+            self.stop_move()  # Stop movement
             if self._status_jump_right_grab:
                 return
             self._status_jump_right_grab = True
         threading.Thread(target=self.jump_right_grab_command, args=(duration, delay), daemon=True).start()
 
     def _jump_up_grab_command(self, duration, delay):
-        '''向上跳（複合動作：按一次上 -> 按住上 -> 微間隔 -> 按下跳躍）'''
+        '''Jump up (composite action: tap up -> hold up -> small delay -> jump)'''
         try:
-            #按一次上，用來過傳點
+            # Tap up once to interact/trigger portal
             self._key_down(self.up_key)
             self._key_up(self.up_key)
 
             self._key_down(self.up_key)
-            time.sleep(delay)          # 微小間隔，讓上鍵先生效，才能觸發向上跳躍的判定
+            time.sleep(delay)          # Small delay so up key registers before jump
             self._key_down(self.jump_key)
             time.sleep(duration)
         except Exception as e:
-            logging.error(f"向上跳動作發生錯誤:{e}")
-        finally:           # 等待跳躍動作結束
+            logging.error(f"Error during jump up action: {e}")
+        finally:           # Wait for jump completion
             self._key_up(self.jump_key)
 
 
@@ -437,9 +437,9 @@ class KeyBoard:
                 self._status_jump_up_grab = False
 
     def jump_up_grab(self, duration=0.02, delay=0.02):
-        '''向上跳對外接口'''
+        '''Jump up external interface'''
         with self._jump_up_grab_lock:
-            self.stop_move()  #<== 停止移動
+            self.stop_move()  # Stop movement
             time.sleep(0.1)
             if self._status_jump_up_grab:
                 return
@@ -447,42 +447,42 @@ class KeyBoard:
         threading.Thread(target=self._jump_up_grab_command, args=(duration, delay), daemon=True).start()
 
     def move_left_to_jump(self,delay=0.4):
-        '''給跳躍狀態做的小位移(左邊)'''
+        '''Small left shift for jump state'''
         with self._move_lock:
             self._press_direction_locked("LEFT")
             time.sleep(delay)
             self._release_direction_locked()
 
     def move_right_to_jump(self,delay=0.4):
-        '''給跳躍狀態做的小位移(右邊)'''
+        '''Small right shift for jump state'''
         with self._move_lock:
             self._press_direction_locked("RIGHT")
             time.sleep(delay)
             self._release_direction_locked()
     #======
-    # 單點跳
+    # Single Jump
     #=====
 
 
     def _jump_down_command(self, duration=0.1, delay=0.03):
-        '''向下跳（複合動作：先按住下 -> 微間隔 -> 按下跳躍）'''
+        '''Jump down (composite action: hold down -> small delay -> jump)'''
         try:
             self._key_down(self.down_key)
-            time.sleep(delay)          # 微小間隔，讓下鍵先生效，才能觸發向下落下的判定
+            time.sleep(delay)          # Small delay so down key registers before jump
             self._key_down(self.jump_key)
             time.sleep(duration)
         except Exception as e:
-            logging.error(f"向下跳動作發生錯誤:{e}")
+            logging.error(f"Error during jump down action: {e}")
         finally:
             self._key_up(self.jump_key)
             self._key_up(self.down_key)
-            time.sleep(0.2)             # 等待跳躍動作結束 
+            time.sleep(0.2)             # Wait for jump completion
 
             with self._jump_down_lock:
                 self._status_jump_down = False
 
     def jump_down(self, duration=0.1, delay=0.03):
-        '''動作: 向下跳'''
+        '''Action: Jump down'''
         with self._jump_down_lock:
             if self._status_jump_down:
                 return
@@ -490,26 +490,26 @@ class KeyBoard:
         threading.Thread(target=self._jump_down_command, args=(duration, delay), daemon=True).start()
 
     def _jump_left_command(self, duration=0.1, delay=0.03):
-        '''向左跳'''
+        '''Jump left'''
         with self._move_lock:
             try:
                 self._press_direction_locked("LEFT")
-                time.sleep(delay)          # 微小間隔，讓方向鍵先生效，才能觸發跳躍轉向
+                time.sleep(delay)          # Small delay so direction key registers before jump
                 self._key_down(self.jump_key)
                 time.sleep(duration)
 
             except Exception as e:
-                logging.error(f"左跳動作發生錯誤:{e}")
+                logging.error(f"Error during jump left action: {e}")
             finally:
                 self._key_up(self.jump_key)
                 self._release_direction_locked()
-                time.sleep(0.2)             # 等待跳躍動作結束 
+                time.sleep(0.2)             # Wait for jump completion
 
         with self._jump_left_lock:
             self._status_jump_left = False
 
     def jump_left(self, duration=0.1, delay=0.03):
-        '''向左跳（複合動作：方向鍵 -> 微間隔 -> 跳躍鍵）'''
+        '''Jump left (composite action: direction key -> delay -> jump key)'''
         with self._jump_left_lock:
             if self._status_jump_left:
                 return
@@ -519,26 +519,26 @@ class KeyBoard:
 
 
     def _jump_right_command(self, duration=0.1, delay=0.03):
-        '''向右跳'''
+        '''Jump right'''
         with self._move_lock:
             try:
                 self._press_direction_locked("RIGHT")
-                time.sleep(delay)          # 微小間隔，讓方向鍵先生效，才能觸發跳躍轉向
+                time.sleep(delay)          # Small delay so direction key registers before jump
                 self._key_down(self.jump_key)
                 time.sleep(duration)
 
             except Exception as e:
-                logging.error(f"右跳動作發生錯誤:{e}")
+                logging.error(f"Error during jump right action: {e}")
             finally:
                 self._key_up(self.jump_key)
                 self._release_direction_locked()
-                time.sleep(0.2)             # 等待跳躍動作結束 
+                time.sleep(0.2)             # Wait for jump completion
 
         with self._jump_right_lock:
             self._status_jump_right = False
 
     def jump_right(self, duration=0.1, delay=0.03):
-        '''向右跳（複合動作：方向鍵 -> 微間隔 -> 跳躍鍵）'''
+        '''Jump right (composite action: direction key -> delay -> jump key)'''
         with self._jump_right_lock:
             if self._status_jump_right:
                 return
@@ -546,15 +546,15 @@ class KeyBoard:
         threading.Thread(target=self._jump_right_command, args=(duration, delay), daemon=True).start()
 
     #======
-    # 上爬
+    # Climb Up / Down
     #=====
 
     def climb_up(self):
         self._key_down(self.up_key)
 
     def climb_down(self):
-        '''動作: 從繩子往下跳'''
-        direction_key = random.choice([self.right_key, self.left_key])  # 每次都隨機跳，看起來比較真
+        '''Action: Jump off rope downwards'''
+        direction_key = random.choice([self.right_key, self.left_key])  # Randomize direction for natural behavior
         self._key_down(direction_key)
         time.sleep(0.03)
         self._key_down(self.jump_key)
@@ -562,35 +562,35 @@ class KeyBoard:
         self._key_up(self.jump_key)
 
 
-    ''' 停止釋放'''
+    ''' Stop / Release '''
 
     def _release_all(self):
-        # 釋放「目前實際追蹤到有按著」的所有鍵 
-        # 這樣新增按鍵(如未來的補血鍵、道具鍵)時不用回來改這裡，也不會漏鍵
+        # Release all keys currently tracked as pressed
+        # Supports dynamic additions (potions, items) without hardcoding
         with self._pressed_keys_lock:
             keys_to_release = list(self._pressed_keys)
 
-        self._key_up(self.up_key) #因為一直沒辦法彈起UP，所以直接寫在這裡
+        self._key_up(self.up_key) # Ensure UP key is explicitly released
 
         for key in keys_to_release:
             self._key_up(key)
-            time.sleep(0.01)  # 給驅動/遊戲一點時間確實處理事件
+            time.sleep(0.01)  # Brief delay for driver/game event dispatch
         
     def release_all(self):
-        #釋放常用、高機率卡住的按鍵
+        # Release all active and stuck keys
         self._packet_wrapper(self._release_all_lock, "_status_release_all", self._release_all)
 
     def stop_move(self):
         self._release_direction()
 
-    ''' 物品使用行為（補血/補魔等） '''
+    ''' Item Usage (HP/MP Potions, etc.) '''
 
     def _item_command(self, key):
         try:
             self._key_down(key)
             time.sleep(3)
         except Exception as e:
-            logging.error(f"使用物品發生錯誤:{e}")
+            logging.error(f"Error using item: {e}")
         finally:
             self._key_up(key)
             with self._item_lock:
@@ -601,18 +601,18 @@ class KeyBoard:
             return
         with self._item_lock:
             if self._status_item:
-                # 上一次使用還沒結束，不重複觸發
+                # Previous usage still in progress, skip duplicate trigger
                 return
             self._status_item = True
             threading.Thread(target=self._item_command, args=(key,), daemon=True).start()
 
-    ''' 撿拾行為 '''
+    ''' Pick Up Behaviors '''
     def _pick_up_command(self, key):
         try:
             self._key_down(key)
             time.sleep(0.1)
         except Exception as e:
-            logging.error(f"撿拾命令發生錯誤:{e}")
+            logging.error(f"Error executing pick up command: {e}")
         finally:
             self._key_up(key)
             self._pick_up = False
@@ -628,10 +628,10 @@ class KeyBoard:
 
     def _packet_wrapper(self, lock, status_attr, target, *args):
         """
-        共用的「防重入 + 背景執行」包裝
-        lock: 對應的 threading.Lock
-        status_attr: 對應的旗標屬性名稱字串，例如 "_status_rope"
-        target: 實際要執行的方法
+        Shared reentrancy prevention and background execution wrapper.
+        lock: Corresponding threading.Lock
+        status_attr: Flag attribute name string (e.g. "_status_rope")
+        target: Target method to execute
         """
         with lock:
             if getattr(self, status_attr):
@@ -642,7 +642,7 @@ class KeyBoard:
             try:
                 target(*args)
             except Exception as e:
-                logging.error(f"{target.__name__} 發生錯誤:{e}")
+                logging.error(f"{target.__name__} error: {e}")
             finally:
                 with lock:
                     setattr(self, status_attr, False)

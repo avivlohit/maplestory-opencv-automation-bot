@@ -3,8 +3,8 @@ from dataclasses import dataclass
 @dataclass
 class BBox:
     '''
-    放置矩形座標
-    format:x_min, y_min, x_max, y_max
+    Bounding box coordinates
+    format: x_min, y_min, x_max, y_max
     '''
     x1: int
     y1: int

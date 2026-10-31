@@ -13,88 +13,89 @@
 
 >**Disclaimer**
 >
-> 本專案僅供個人學習 Python 影像辨識與自動化測試交流使用<br>請在合乎遊戲條例下使用。
+> This project is intended solely for personal study of Python computer vision and automation testing exchange.<br>Please use it in compliance with the game's terms of service.
 
 ---
 
-##  Current Features (WIP)
+## Current Features (WIP)
 
-| 功能項目 |  說明 |
+| Feature | Description |
 | :--- | :--- |
-| **自動移動** | 平台內水平移動<br>垂直方向移動<br>障礙物跳躍(需設定跳躍點) |
-| **自動尋怪** | 平台內巡迴找怪<br>時間內無怪物觸發找垂直移動進入新平台 |
-| **自動打怪** | 支援普通攻擊<br>支援範圍攻擊<br>支援跳打攻擊(鏢賊跳射) |
-| **自動撿取** | 移動時自動觸發撿拾按鍵 |
-| **自動喝水** | 喝紅藥水<br>喝藍藥水 |
-| **卡住脫離**| 一定時間沒移動，觸發隨機走跳<br>找最近平台返回|
-| **行為動作**|人物行走時會以座標判斷各種動作點(需設定)|
+| **Auto Movement** | Horizontal movement on platforms<br>Vertical movement (ropes/ladders)<br>Obstacle jumping (requires configured jump points) |
+| **Auto Mob Tracking** | Patrol platforms searching for mobs<br>If no mobs are found within a timeout, navigate via vertical channels to a new platform |
+| **Auto Combat** | Supports basic attack<br>Supports AOE (Area of Effect) attacks<br>Supports jump-attacks (e.g., Night Lord / Assassin jump-shot) |
+| **Auto Pick-up** | Automatically triggers pick-up keystrokes while moving |
+| **Auto Potion** | HP potion consumption<br>MP potion consumption |
+| **Unstuck Recovery** | If stationary for a period, triggers random walk/jump<br>Finds and returns to the nearest platform |
+| **Action Points** | Character triggers actions at specific coordinates during navigation (requires configuration) |
+
 ---
-### 開發/測試環境
-* 螢幕解析度（原生）：2560 x 1600
-* DPI 縮放比例：125%
-* 若環境與設置不同，可能造成偵測抓取低效或抓取不到範圍的問題。
+### Development / Test Environment
+* Screen Resolution (Native): 2560 x 1600
+* DPI Scaling: 125%
+* Differing environments or display settings may lead to low detection accuracy or misaligned capture regions.
+
 ---
 
 ## Usage
-#### I. 安裝環境與套件
+
+#### I. Install Environment & Dependencies
 ```bash
 pip install -r requirements.txt
 ```
-#### II. 製作角色名片: 
-* 進入遊戲，開啟`GetNameTag.py`，找個視野乾淨的場景，按`Z`快照自己的角色名片，用作樣本匹配。
 
-* 人物名牌快照儲存於`img\nametag`資料夾內
-</p>
+#### II. Generate Character Name Tag:
+* Launch the game and run `GetNameTag.py`. Find a clean scene/background and press `Z` to capture your character's name tag for template matching.
+* Character name tag snapshots are saved in the `img/nametag` directory.
+
 <table>
   <tr>
     <td align="center">
       <img src="./assets/NameTag_demo.png" width="200"><br>
-      <em>紅色框框聚焦成功後，按下"Z"鍵拍照</em>
+      <em>Press 'Z' to capture once the red bounding box focuses properly</em>
     </td>
     <td align="center">
-      <img src="./assets/NameTag_demo_2.png"
-      width="200">
-      <br>
-      <em>成功後得到人物去背後的名牌</em>
+      <img src="./assets/NameTag_demo_2.png" width="200"><br>
+      <em>Successful output yields the character's background-removed name tag</em>
     </td>
   </tr>
 </table>
 
-#### III. 錄製移動路徑:
-* 先到路徑`./config/config_data`
-   設定`quickly_choice_map`的對應地圖。
-* 進入遊戲，調整視窗大小為`1366*768`開啟`OperationLogger.py`，錄製`平台點`與`垂直移動的通道`
+#### III. Record Movement Paths:
+* Navigate to `./config/config_data.yaml` and set the target map in `quickly_choice_map`.
+* Enter the game, set the game window size to `1366x768`, and launch `OperationLogger.py` to record `platform points` and `vertical movement channels`.
+
 <p align="center">
   <img src="./assets/OperationLogger_demo.png" width="200"><br>
-  <em >小地圖可以看見所畫的通道</em>
+  <em>Drawn movement channels displayed on the minimap</em>
 </p>
 
-#### IV. 啟動程序:
-* 確認角色已經在對應的遊戲地圖，打開`main.py`，運行程序。
-* 預設按鍵`F9`:暫停；`F12`:關閉程序
+#### IV. Launch Bot:
+* Ensure your character is already located on the corresponding game map.
+* Run `main.py` (with administrator privileges if required).
+* Default hotkeys: `F9` to Pause / Resume; `F12` to Exit.
 
 ---
 
+## Settings & Configuration
 
-## Setting
+* **Potion Settings**
+  * Path: `./config/config_default.yaml`
+  * `Value`: percentage threshold (0 - 100).
+  * 3 stages configured by default; dynamically loaded, allowing additional thresholds as needed.
 
-* 藥水設定
-  * 路徑`./config/config_default`
-  * `Value`為百分比 0 -100 
-  * 預設三個階段，但這邊是動態載入，可擴增設定更多水線設定
 <p align="center">
   <img src="./assets/setting-1.png" width="300">
 </p>
 
-* 戰鬥設定
-  * `is_Night_Lord`: 給鏢賊跳射或某些時候需要跳打所用，用到機會很少
-  * `enable_AOE` :　開啟範圍攻擊判斷的開關
-  * `AOE_threshold` : 判斷使用，怪物滿足該設定值，才會觸發AOE攻擊狀態的按鍵
-  * `attack_range` : 人物的攻擊範圍，目標在這範圍內，人物才會攻擊
-  * `mob_min_threshold` : 怪物匹配的過濾值，這裡需要根據情況調整，太高容易抓不到怪物，太低容易抓到鬼影造成人物空揮
-  * `role_min_threshold` : 人物判斷不到時能調整這參數，正常設定好人物NameTag的話，並不需要動這個參數
-  * `roi_offset` : 可調整ROI偵測框大小，ROI偵測框內才會做怪物偵測的判斷，過大容易吃效能，建議按照實際情況調整
-
+* **Combat Settings**
+  * `is_Night_Lord`: Jump-shot toggle for Night Lords / Assassins or whenever jump-attacking is needed.
+  * `enable_AOE`: Toggle for enabling Area-of-Effect attacks.
+  * `AOE_threshold`: Mob count threshold required to trigger AOE skills.
+  * `attack_range`: Character attack range; targets within this range trigger attacks.
+  * `mob_min_threshold`: Template matching confidence threshold for mobs. Adjust as needed: too high might miss mobs, too low may cause phantom triggers and whiffing attacks.
+  * `role_min_threshold`: Threshold for character detection. Usually does not need modification once the character NameTag is properly set up.
+  * `roi_offset`: Bounding box offset size for Region of Interest (ROI). Mob detection only runs within this ROI. Excessively large ROIs impact performance.
 
 <p align="center">
   <img src="./assets/setting-combat-1.png" width="300">
@@ -103,134 +104,126 @@ pip install -r requirements.txt
   <img src="./assets/setting-combat-2.png" width="300">
 </p>
 
-* 輸入控制設定
-
-  * 輸入模塊是用第三方庫`interception`， `interception`的鍵碼很直觀
-  * 若想更確定對應的值，可以簡單用`./tools`內的`keyboard_check.py`測試按鍵輸出的值
+* **Input Control Settings**
+  * Uses the third-party library `interception` for hardware-level keystrokes. Key codes are straightforward.
+  * To inspect key values, test them using `./tools/keyboard_check.py`.
 
 <p align="center">
   <img src="./assets/setting-horkey-1.png" width="300">
 </p>
 
-* 地圖設定
-  * 路徑`./config/config_data`
-  * 設定`quickly_choice_map`的值，為角色運行的地圖
-  * 利用`map`下方的鍵值擴增對應地圖的怪物配對模板
+* **Map Settings**
+  * Path: `./config/config_data.yaml`
+  * Set `quickly_choice_map` to the active map name.
+  * Under the `map` section, configure mob template matching lists corresponding to each map.
 
 <p align="center">
   <img src="./assets/setting-map-1.png" width="300">
 </p>
 
-* Minimap 移動點設定
-   * 路徑`
-   ./img/mini_map/[對應的地圖]/[對應的地圖].yaml`
-   * 要新增地圖模板到 `maplestory.wiki` 個網站抓
- 
+* **Minimap Waypoint Configuration**
+  * Path: `./img/mini_map/[Map_Name]/[Map_Name].yaml`
+  * To add new map templates, source them from sites such as `maplestory.wiki`.
 
 <table>
   <tr>
     <td align="center">
       <img src="./assets/setting-4.png" width="300"><br>
-    <em>錄製腳本繪製的路線</em>
+      <em>Waypoints and paths plotted via the recording script</em>
     </td>
     <td align="center">
       <img src="./assets/setting-3.png" width="300"><br>
-      <em>路徑儲存的形式</em>
+      <em>Format of recorded coordinates in YAML</em>
     </td>
   </tr>
 </table>
 
-* 路徑錄製方法
-  * 工具放在跟目錄的腳本`OperationLogger.py`，能錄製路徑
-  * 或者，進入`img/mini_map`裡面的`ymal設定檔`能手動增刪查改
+* **Waypoint Recording Guide**
+  * Run `OperationLogger.py` in the root directory to record paths.
+  * Alternatively, edit the YAML files under `img/mini_map/` manually.
 
-
-| 熱鍵    | 功能說明 | 備註 |
+| Hotkey | Description | Note |
 | :--- | :--- | :--- |
-| &nbsp; **F1** | 儲存行為座標至 YAML | 將目前記錄的所有動作輸出為設定檔 |
-| &nbsp; **F2** | 離開程式 | 安全關閉並退出 |
-| &nbsp; **F4** | 紀錄點位：`Walk` | 記錄一般移動點 |
-| &nbsp; **F5** | 紀錄點位：`Rope` | 記錄垂直爬繩點 |
-| &nbsp; **F6** | 紀錄點位：`Jump` | 該動作點，觸發按下跳躍 |
-| &nbsp; **F7** | 紀錄點位：`JumpDown` | 該動作點，觸發下向方跳躍  |
-| &nbsp; **-** | 紀錄點位：`M_LEFT` | 該動作點，觸發向左小位移(約4像素)  |
-| &nbsp; **+** | 紀錄點位：`M_LEFT` | 該動作點，觸發向右小位移(約4像素)  |
-
+| **F1** | Save behavior coordinates to YAML | Exports all recorded actions to config file |
+| **F2** | Exit program | Safely quit logger |
+| **F4** | Record point: `Walk` | Standard movement point |
+| **F5** | Record point: `Rope` | Vertical ladder / rope climbing point |
+| **F6** | Record point: `Jump` | Action point triggering jump |
+| **F7** | Record point: `JumpDown` | Action point triggering down-jump |
+| **-** | Record point: `M_LEFT` | Micro-movement left (~4 pixels) |
+| **+** | Record point: `M_RIGHT` | Micro-movement right (~4 pixels) |
 
 ---
 
-## Dev Notes 
->[LEARNING] 圖像匹配:為了提高精度，有測試切片、遮罩還有很多方法，但會貌似都很容易加大運算量，精度、效能也沒明顯提升，最後用線程池去做反而更簡單；測試時沒有添加過濾算法，locs數量會異常多，而劃出BBox可能因運算量太大而CTD
+## Dev Notes
 
->[NOTE] 自動控制順序: 健康判定 -> 打怪判定 -> 平台巡邏找怪 -> 時間未找到怪物 -> 脫困判斷 -> 平台找垂直通道 -> 移動到下個平台 <br> 脫困判斷 1.不再平台或繩子上，判斷最近平台，並移動至最近平台
+>[LEARNING] **Template Matching**: Tested slicing, masking, and other techniques to improve precision, but many added significant computational overhead without noticeable accuracy gains. Ultimately, using a thread pool was simpler and more effective. During testing without filtering algorithms, match locations exploded, and drawing bounding boxes caused CTD (crash to desktop) due to high load.
 
->[NOTE] 遊戲像素偏位: 每次遊戲重啟，都會有 X:0~2 Y:0~2的像素偏位。沒想到其他方法，目前只能把很多判定放寬取容錯
+>[NOTE] **Automated Decision Flow**: Health Check -> Combat Check -> Platform Patrol for Mobs -> Timeout (No mobs found) -> Unstuck Check -> Platform Vertical Path Search -> Move to Next Platform.<br>Unstuck Logic: 1. If not on a platform or rope, identify and navigate to the nearest platform.
 
->[DONE]解決地圖邊界判定問題:舊版本ROI未偵測到人物後，會開始計數，達到設定閥值後，觸發隨機走路，讓人物偵測捕獲；改以小地圖+座標平台化，做左右邊界判定
+>[NOTE] **Pixel Offset**: Each game restart exhibits a pixel offset of X: 0~2, Y: 0~2. Currently addressed by relaxing tolerances.
 
->[TODO -> DONE ] 尋怪邏輯:改以minimap獲得的人物座標做計算，效果比原本的隨機找怪邏輯更好，不用浪費大量運算做人物座標抓取了。
+>[DONE] **Map Boundary Detection**: Older versions counted missed detections when character ROI was lost; upon reaching a threshold, random walking was triggered. Now migrated to minimap + coordinate platforming for left/right boundary detection.
 
->[TODO -> DONE X,Y軸移動:Y軸移動還需要優化；更細節的行為操作，全都綁定迷你地圖X、Y，包括使用單軸[Y]來做爬繩的狀態監測。
+>[TODO -> DONE] **Mob Hunting Logic**: Switched to computing positions from character minimap coordinates, which is significantly better than random patrol and avoids heavy character screen coordinate extraction.
 
->[ISSUE -> FIX] 健康監測:畫面不匹配，導致抓不到像素，原本的防呆功能好像沒有用處，尤其是畫面切換時，會一直觸發喝水行為;觀察原因，健康條會閃爍，閃爍時抓取的數值為0，導致觸發喝水；修正方式:更改異常判定、加血魔冷卻計算。
+>[TODO -> DONE] **X/Y Movement**: Y-axis movement still needs optimization. Detailed actions are all bound to minimap X/Y, including using the single Y-axis to monitor climbing status.
 
->[ISSUE -> FIX] 健康模組:把HP偵測範圍寫死，導致若畫面DPI縮放，偵測範圍會跑掉；修正後，改模板匹配初始化座標。 
+>[ISSUE -> FIX] **Health Monitoring**: Screen mismatch caused pixel reading errors. Flashing HP bar read as 0, repeatedly triggering potions. Fixed with abnormal value filtering and potion cooldowns.
 
->[TODO - DONE] 卡死走回: 超出範圍，走回最近平台，不過Y值差距太大沒用
+>[ISSUE -> FIX] **Health Module DPI Issue**: Hardcoded HP detection regions broke when DPI scaling changed. Replaced with template matching for dynamic coordinate initialization.
 
->[ISSUE -> FIX] 小地圖偏位:openCV做的小地圖，與實際地圖沒辦法對齊，模組都排查了，但還是想不出為什麼會這樣，希望不要是DPI影響的問題；找出問題原因，MinimapDetector模組中，cv2.findNonZero找出所有顏色座標後，被取平均，導致座標點異常，改以cv2.findContours搭配cv2.RETR_EXTERNAL與cv2.CHAIN_APPROX_SIMPLE 只抓單一最大輪廓。
+>[TODO -> DONE] **Unstuck Return**: When exceeding boundaries, return to the nearest platform (large Y discrepancies need further handling).
 
->[ISSUE -> FIX] 垂直爬繩卡鍵: rope垂直上下一直有卡UP鍵問題，目前也只解決上爬的卡鍵問題，但是下爬後的卡鍵問題，仍然找不到;應該好多了，大概問題解決
+>[ISSUE -> FIX] **Minimap Misalignment**: OpenCV minimap didn't align with the actual game minimap. Cause: `cv2.findNonZero` points were averaged, skewing coordinates. Resolved using `cv2.findContours` (`cv2.RETR_EXTERNAL`, `cv2.CHAIN_APPROX_SIMPLE`) to extract only the largest outer contour.
+
+>[ISSUE -> FIX] **Vertical Climbing Key Jam**: Rope movement had an issue with the UP key getting stuck. Climbing down had similar issues; mostly resolved now.
 
 <p align="center">
   <img src="./assets/issue-minimap.png" width="300">
   <br>
-  <em>cv2畫出的BBOX與原版地圖不合(已修復))</em>
+  <em>cv2 bounding box misaligned with original map (Fixed)</em>
 </p>
 
->[TODO-> DONE] 模板匹配優化:用支援MASK遮罩的匹配法，把目前的匹配方法換掉；目前只把怪物匹配替換，人物名牌的匹配還沒換；名牌遮罩也添加了，也做異常值預防，效果更穩定了
+>[TODO -> DONE] **Template Matching Optimization**: Migrated to template matching supporting MASKs to filter backgrounds. Applied to mob templates and character name tags.
 
->[TODO] 行為點:增加更多種行為點，右邊跳躍、左邊跳躍、下跳之類的，放在預設的狀態機"PathfindState"類；新增左跳、右跳，但只能做單跳，還沒想到方法能做連續跳躍的判定；完成上下左右跳躍點，但缺少測試與追蹤；移除跳爬類的指令，改用跳躍類的指令，移除跳爬狀態機
+>[TODO] **Action Points**: Adding more action point types (jump left, jump right, jump down) in the `PathfindState` class. Single jumps added; multi-jump chains still pending.
 
->[TODO -> DONE] AutoControl臃腫: 用了大量的Flag、IF判斷去控制邏輯，方向不大對，非常難維護。應該要在想個方法重構這塊；重構翻新整個狀態機。；重構AutoControl與狀態機，原本的狀態機分類為指令分配器。
+>[TODO -> DONE] **AutoControl Refactoring**: Previous logic used heavy flags and nested IF statements, making maintenance difficult. Refactored FSM into cleaner state handlers and a command dispatcher.
 
->[FIX] 打怪函式 _fk_that_mob：　我混用了畫面的人物座標與小地圖的人物座標做邏輯判斷，導致行為錯亂，花費好多時間才定位到這問題。
+>[FIX] **Combat Function `_fk_that_mob`**: Mixing screen-space character coordinates with minimap coordinates caused conflicting behaviors. Resolved.
 
->[UPDATE] 移除 JumpState 狀態機: 因為把對於跳躍點的判斷，寫進水平移動與垂直移動了，感覺可能不需要了，先拔掉測試一陣子
+>[UPDATE] **Removed `JumpState` FSM**: Jump point evaluations were integrated directly into horizontal and vertical movement logic, making `JumpState` redundant.
 
 ---
 
 ## Tools
-| 檔案名稱 | 核心用途 | 備註 |
-| :--- | :--- |  :--- |
-| `Auto_PickUP.py` | 自動撿拾腳本 |  拾取腳本，當有觸發"方向鍵"的"上下左右"時，會自動觸發撿拾按鍵 |
-| `GetNameTag.py` | 擷取人物名牌 |  要先用這個抓自己人物名牌，才可以更準的定位。啟動後找到乾淨的背景按下"Z"鍵，提取人物名牌。 |
-| `CaptureScreen.py` | 顯示座標與截圖 |  計算螢幕座標與視窗內座標  |
-|`OperationLogger.py`|錄製小地圖的行動點|沒有錄製行動點的話，程序沒辦法動，至少錄製一個打怪平台，才可以計算左右範圍，儲存路徑為 `mini_map\[對應地圖]`的目錄下，錄製前要在`config_data.yaml`設定`quickly_choice_map`|
-| `CocoBeater.py` | 蒐集可可果實腳本 |  一個簡單掛機賺錢的小腳本，換頻道功能沒寫完，換到第60頻道後沒有返回功能，所以最多換60頻道  |
-| `keyboard_check.py` | 查詢按鍵設定的鍵位 | 顯示 keyborad套件中，鍵位的對應名稱，用於設定config的鍵盤命令 |
+
+| File | Core Purpose | Notes |
+| :--- | :--- | :--- |
+| `Auto_PickUP.py` | Auto loot script | Automatically triggers loot key whenever directional keys (Up/Down/Left/Right) are active |
+| `GetNameTag.py` | Capture character name tag | Used to extract character name tag for template matching. Run in a clean scene and press `Z` |
+| `CaptureScreen.py` | Coordinate display & screenshot | Calculates screen coordinates vs window client coordinates |
+| `OperationLogger.py` | Minimap waypoint recorder | Records platform points and channels. Output saved under `img/mini_map/[Map_Name]/`. Configure `quickly_choice_map` in `config_data.yaml` first |
+| `CocoBeater.py` | Coconut harvesting script | Farming script for gathering coconuts. Channel switching stops at channel 60 |
+| `keyboard_check.py` | Key code inspector | Displays key names from the `keyboard` package for easy config keybinding |
 
 ---
+
 ## Tech Stack
 
-* **視窗抓取 (Win32 API + Pillow)**：
-  * 使用 `win32gui` 取得遊戲視窗句柄 (`hwnd`) 與視窗邊界 (`GetClientRect` / `ClientToScreen`)。
-  * 結合 `ImageGrab` (mss/Pillow) 進行高效能的視窗截圖，並轉為 OpenCV 的 BGR 陣列格式。
-* **樣板匹配 (Template Matching)**：
-  * **灰階與二值化預處理**：將畫面與模板轉為灰階，利用 `cv2.threshold` (OTSU 演算法) 消除雜訊、突顯輪廓。
-  * `TM_CCORR_NORMED`: (歸一化互相關)支援使用遮罩（Mask）過濾背景干擾，對亮度非常敏感，容易給高亮匹配區更大權重分數。
-  * `TM_CCOEFF_NORMED`: (歸一化相關係數) 會先減去平均值，再除以標準差，所以會減少亮度影響，以及對比度、波動幅度的影響，更容易比對特徵。
-  * **NMS（Non-Maximum Suppression**
-    * 利用NMS清除重複匹配，減輕`draw_dectection_box`繪圖運算量，打怪功能前的重要步驟
-
-* **硬體操控**
-    * 選用 `interception`: 硬體層下達底層指令，能繞過多遊戲的封鎖
-    * 選用`keyboard`: 最簡單、最直觀，也功能強大，但是是信息層命令，所以很多命令控制不太穩
-    * 使用`win32gui` : Windows API 底層是 原生的微軟 C+ 所以很好用，就是寫法不親民
-* **線程池**
-    * 使用`concurrent.futures`內的`ThreadPoolExecutor`來分擔怪物模板匹配的工作
-##
-
-
-
-
+* **Window Capture (Win32 API + Pillow)**:
+  * Uses `win32gui` to obtain game window handle (`hwnd`) and client rect (`GetClientRect` / `ClientToScreen`).
+  * Combined with `ImageGrab` (mss/Pillow) for high-performance window capture, converted to OpenCV BGR format.
+* **Template Matching**:
+  * **Grayscale & Binary Preprocessing**: Converts captures and templates to grayscale, using `cv2.threshold` (OTSU) to reduce noise and enhance edges.
+  * `TM_CCORR_NORMED`: Normalized cross-correlation supporting alpha masks; sensitive to brightness.
+  * `TM_CCOEFF_NORMED`: Normalized correlation coefficient; subtracts mean and divides by standard deviation to reduce brightness and contrast fluctuations.
+  * **NMS (Non-Maximum Suppression)**:
+    * Cleans up redundant overlapping bounding boxes, reducing drawing load and stabilizing mob targeting.
+* **Hardware & Input Control**:
+  * `interception`: Driver-level / hardware keystroke injection capable of bypassing standard game hooks.
+  * `keyboard`: Simple user-space input library (used for listener/testing tools).
+  * `win32gui`: Native Windows API for window management and handle manipulation.
+* **Concurrency**:
+  * `ThreadPoolExecutor` from `concurrent.futures` to parallelize multi-template mob matching.

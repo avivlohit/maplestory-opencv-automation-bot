@@ -1,938 +1,789 @@
-import time
+"""Automatic game controller.
+
+The controller receives a :class:`GameState` snapshot, evaluates the current
+player/map/monster information, and returns an action for the input-control
+layer in the form ``(action_name, parameters)``.
+
+High-level state selection remains the responsibility of ``BotState``. This
+class provides map geometry, movement helpers, combat decisions, and health
+management integration.
+"""
+
+from __future__ import annotations
+
 import logging
+import random
+import time
+from pathlib import Path
+from typing import Any, Optional
+
+import yaml
+
 from config.config_loader import config
-from typing import Optional
 from src.engine.game_state import GameState
 from src.engine.HealthManager import HealthManager
 from src.engine.fsm.BotState import BotState
-import time
-import random
-from pathlib import Path
-import yaml
-import time
-# from enum import Enum, auto
 
-import re
-'''
-改為，接收封包(GameState)，以封包數據進行邏輯運算與決策，
-輸出對應行為指令與目標資訊給控制模組
 
-健康控制用插入
-狀態種類(互斥責為狀態): COMBAT、
-'''
-#===全域常數===
-VERTI_MOVE_STAY_TIMEOUT = 0.25 # < -  管理"向上攀爬"出去後，停留多久退出攀爬動作的時間記數
+# Time allowed for the player to remain still at the end of a vertical move.
+VERTI_MOVE_STAY_TIMEOUT = 0.25
 
-#======
+# A player is considered stuck after this many seconds without a position change.
+STUCK_TIMEOUT = 1.5
+
+# Mini-map coordinate tolerance when checking whether the player reached an
+# explicitly configured action point.
+ACTION_POINT_X_TOLERANCE = 2.5
+ACTION_POINT_Y_TOLERANCE = 2
+
+
+ActionResult = tuple[Optional[str], Optional[dict[str, Any]]]
+
+
 class AutoControl:
+    """Make game decisions from incoming ``GameState`` snapshots."""
 
-    def __init__(self):
+    # Convert route-file action names into directions understood by the
+    # controller/input layer.
+    JUMP_ACTION_DIRECTION = {
+        "Jump": "NONE",
+        "JumpDown": "DOWN",
+        "M_LEFT": "M2LEFT",
+        "M_RIGHT": "M2RIGHT",
+        "JumpLeft": "LEFT",
+        "JumpRight": "RIGHT",
+    }
 
-        #---[實例化]
+    def __init__(self) -> None:
+        # Components
         self.health_manager = HealthManager()
-        self.bot_state = BotState(self) # 把自己(AutoControl)交給狀態機當 owner，讓狀態機能反過來呼叫函式或共用資料
+        self.bot_state = BotState(self)
 
-        #---[外部參數&設定]
-        self.buffer = config.get("auto_control_config.buffer", 0) # <-- 邊界距離緩衝(平台的邊界距離+緩衝距離)
-        self.verti_move_threshold = config.get("auto_control_config.verti_move_threshold",10)
-        self.ENABLE_AOE_ATTACK = config.get("player_setting.auto_control_config.enable_AOE")
-        self.AOE_THRESHOLD = config.get("player_setting.auto_control_config.AOE_threshold")
-        # TODO: 封存,待跳抓狀態機取消測試完畢後確認是否刪除或恢復
-        # self.JUMP_DISTANCE_THRESHOLD = config.get("auto_control_config.JUMP_DISTANCE_THRESHOLD", 10) 
-        # self.ACTION_POINT_RANGE = config.get("auto_control_config.ACTION_POINT_RANGE", 1) 
+        # External configuration
+        self.buffer = config.get("auto_control_config.buffer", 0)
+        self.verti_move_threshold = config.get(
+            "auto_control_config.verti_move_threshold", 10
+        )
+        self.ENABLE_AOE_ATTACK = config.get(
+            "player_setting.auto_control_config.enable_AOE", False
+        )
+        self.AOE_THRESHOLD = config.get(
+            "player_setting.auto_control_config.AOE_threshold", 1
+        )
+        self.player_attack_range = config.get(
+            "player_setting.auto_control_config.attack_range", 0
+        )
 
-        #---[內部參數&設定]
-        self.search_direction = random.choice(["LEFT", "RIGHT"]) #<-- 巡邏方向;第一次初始化隨機方向
-        self.player_attack_range = config.get("player_setting.auto_control_config.attack_range") # <-- 玩家攻擊範圍
+        # Patrol direction. The initial direction is random.
+        self.search_direction = random.choice(("LEFT", "RIGHT"))
 
-        #---[地圖用容器]
-        self.recored_data = []#<-- 所有行為點的容器
-        self.platforms = [] #<-- 所有平台
-        self.vertical_passage = [] #<-- 所有垂直通道
-        self.action_points = [] #<-- 存放所有設定行為點
+        # Map data. ``recored_data`` retains the original attribute spelling
+        # because other parts of the project may already reference it.
+        self.recored_data: list[dict[str, Any]] = []
+        self.mini_map: Optional[Path] = None
+        self.platforms: list[dict[str, tuple[float, float]]] = []
+        self.vertical_passage: list[dict[str, tuple[float, float]]] = []
+        self.action_points: list[dict[str, Any]] = []
 
-        #---[座標用容器]
-        self.current_platform = None #<-- 當前人物所在的平台
-        self.current_vertical_passage = None #<-- 當前人物所在的垂直通道
-        self.mini_player_loc = None #<-- 當前人物位置(小地圖)
-        self.last_player_loc = None #<-- 上次人物位置(小地圖)
-        self.current_verti_target = None #<-- 當前垂直通道目標方向
-        self.last_player_y_loc = None #<==defc last_player_y_loc 使用
+        # Player and navigation state
+        self.current_platform: Optional[int] = None
+        self.current_vertical_passage: Optional[int] = None
+        self.mini_player_loc: Optional[tuple[float, float]] = None
+        self.last_player_loc: Optional[tuple[float, float]] = None
+        self.current_verti_target: Optional[str] = None
+        self.last_player_y_loc: Optional[float] = None
 
-        #---[定時器]
-        self.detect_move_stuck_timer = 0 #<--移動卡住計時器
-        self._verti_movement_timer = None #<--垂直移動計時器
-        #---[載入設定]
+        # Timers
+        self.detect_move_stuck_timer = 0.0
+        self._verti_movement_timer: Optional[float] = None
+
         self._load_map_data()
 
+    # ------------------------------------------------------------------
+    # Map loading and geometry
+    # ------------------------------------------------------------------
 
-
-    #=================
-    # 載入設定
-    #=================
-
-    def _load_map_data(self):
-        '''
-        載入地圖模板、預設座標
-        '''
+    def _load_map_data(self) -> None:
+        """Load the selected map route and derive platforms/passages/actions."""
         try:
             map_name = config.get("quickly_choice_map")
-            self.mini_map = Path(config.get(f"mini_map.{map_name}"))
-            folder_path = self.mini_map.parent
-            yaml_path = folder_path / f"{map_name}.yaml"
+            map_path_value = config.get(f"mini_map.{map_name}")
 
-            if yaml_path.exists():
-                with open(yaml_path, "r") as f:
-                    self.recored_data = yaml.safe_load(f)
+            if not map_name:
+                raise ValueError("'quickly_choice_map' is not configured")
+            if not map_path_value:
+                raise ValueError(f"No mini-map path configured for {map_name!r}")
 
-                # 解析平台和垂直通道
-                self.platforms = self._find_platform()
-                self.vertical_passage = self._find_vertical_passage()
-                self.action_points = self._find_action_points()
-                logging.info(f"{map_name}地圖載入完成，平台數量:{len(self.platforms)},垂直通道數量:{len(self.vertical_passage)},跳躍點數量:{len(self.action_points)}")
-                print(f"{map_name}地圖載入完成\n平台數量:{len(self.platforms)}\n垂直通道數量:{len(self.vertical_passage)},跳躍點數量:{len(self.action_points)}")
-        except Exception as e:
-            logging.error(f"載入地圖失敗{e}")
+            self.mini_map = Path(map_path_value)
+            yaml_path = self.mini_map.parent / f"{map_name}.yaml"
+            if not yaml_path.is_file():
+                raise FileNotFoundError(f"Map file does not exist: {yaml_path}")
 
-    #=================
-    # 功能:地圖感測
-    #=================
+            with yaml_path.open("r", encoding="utf-8") as file:
+                route_data = yaml.safe_load(file)
 
-    def _find_platform(self):
-        """
-        功能:
-            分析路徑設定，拆出每個平台、平台範圍。
-        """
-        platforms = []
-        i= 0
-        while i < len(self.recored_data)-1:
-            current = self.recored_data[i]
-            next_item = self.recored_data[i + 1]
+            if not isinstance(route_data, list):
+                raise ValueError("The map YAML root must be a list of route points")
 
-            if current["action"] =='walk' and next_item["action"] == 'walk':
+            self._validate_map_data(route_data)
+            self.recored_data = route_data
 
-                top = min(current["loc"][1], next_item["loc"][1])  - 2
-                bottom = max(current["loc"][1], next_item["loc"][1]) + 6
-                left = min(current["loc"][0], next_item["loc"][0])
-                right = max(current["loc"][0], next_item["loc"][0]) 
+            self.platforms = self._find_platform()
+            self.vertical_passage = self._find_vertical_passage()
+            self.action_points = self._find_action_points()
 
-                platforms.append({"t_l":(left,top),"b_r":(right,bottom)})
-                i += 2
+            message = (
+                f"{map_name} map loaded successfully: "
+                f"{len(self.platforms)} platforms, "
+                f"{len(self.vertical_passage)} vertical passages, "
+                f"{len(self.action_points)} action points"
+            )
+            logging.info(message)
+            print(message)
+
+        except Exception:
+            # Keep the controller in a predictable, empty-map state if loading
+            # fails. The failure is logged with its traceback for debugging.
+            logging.exception("Failed to load map data")
+            self.recored_data = []
+            self.platforms = []
+            self.vertical_passage = []
+            self.action_points = []
+
+    @staticmethod
+    def _validate_map_data(route_data: list[Any]) -> None:
+        """Validate the minimum structure required by the map parsers."""
+        for index, item in enumerate(route_data):
+            if not isinstance(item, dict):
+                raise ValueError(f"Map entry {index} must be a dictionary")
+            if "action" not in item or "loc" not in item:
+                raise ValueError(
+                    f"Map entry {index} must contain 'action' and 'loc'"
+                )
+
+            location = item["loc"]
+            if (
+                not isinstance(location, (list, tuple))
+                or len(location) != 2
+                or not all(
+                    isinstance(value, (int, float)) for value in location
+                )
+            ):
+                raise ValueError(
+                    f"Map entry {index} has an invalid location: {location!r}"
+                )
+
+    def _find_platform(self) -> list[dict[str, tuple[float, float]]]:
+        """Build platform rectangles from consecutive pairs of ``walk`` points."""
+        platforms: list[dict[str, tuple[float, float]]] = []
+        index = 0
+
+        # The route format represents a platform using two consecutive walk
+        # points. Advancing by two preserves that existing file-format rule.
+        while index < len(self.recored_data) - 1:
+            current = self.recored_data[index]
+            following = self.recored_data[index + 1]
+
+            if current["action"] == "walk" and following["action"] == "walk":
+                x1, y1 = current["loc"]
+                x2, y2 = following["loc"]
+
+                top = min(y1, y2) - 2
+                bottom = max(y1, y2) + 6
+                left = min(x1, x2)
+                right = max(x1, x2)
+
+                platforms.append({
+                    "t_l": (left, top),
+                    "b_r": (right, bottom),
+                })
+                index += 2
             else:
-                i += 1 
+                index += 1
 
         return platforms
-    
-    def _find_vertical_passage(self):
-        '''
-        功能:
-            分析路徑設定，拆出垂直通道(繩子)，並製作出垂直通道範圍
 
-            垂直通道若 x 為 0 ；  -3 ~3 之間 ，人物基礎素質能跳爬
-        '''
-        passage = []
-        i = 0
-        while i < len(self.recored_data) - 1:
-            current = self.recored_data[i]
-            next_item = self.recored_data[i + 1]
+    def _find_vertical_passage(
+        self,
+    ) -> list[dict[str, tuple[float, float]]]:
+        """Build rope-passage rectangles from consecutive pairs of ``rope`` points."""
+        passages: list[dict[str, tuple[float, float]]] = []
+        index = 0
 
-            if current["action"] == "rope" and next_item["action"] == "rope":
+        while index < len(self.recored_data) - 1:
+            current = self.recored_data[index]
+            following = self.recored_data[index + 1]
 
-                top = min(current["loc"][1],next_item["loc"][1]) - 2
-                bottom = max(next_item["loc"][1],current["loc"][1]) + 3
+            if current["action"] == "rope" and following["action"] == "rope":
+                x1, y1 = current["loc"]
+                x2, y2 = following["loc"]
 
-                left = min(current["loc"][0], next_item["loc"][0]) - 3
-                right = max(current["loc"][0], next_item["loc"][0]) + 3
+                top = min(y1, y2) - 2
+                bottom = max(y1, y2) + 3
+                left = min(x1, x2) - 3
+                right = max(x1, x2) + 3
 
-                passage.append({"t_l":(left,top),"b_r":(right,bottom)})
-                i += 2
+                passages.append({
+                    "t_l": (left, top),
+                    "b_r": (right, bottom),
+                })
+                index += 2
             else:
-                i += 1
+                index += 1
 
-        return passage
-    
-    def _find_action_points(self):
-        '''
-        功能:
-            解析各個action point ，放進容器內
+        return passages
 
-        '''
-        # 對動作做方向映射
-        JUMP_ACTION_DIRECTION = {
-            "Jump": "NONE",
-            "JumpDown":"DOWN",
-            "M_LEFT": "M2LEFT",
-            "M_RIGHT": "M2RIGHT",
-            "JumpLeft": "LEFT",
-            "JumpRight": "RIGHT",
-        }
+    def _find_action_points(self) -> list[dict[str, Any]]:
+        """Extract configured jump/action points from the route data."""
+        action_points: list[dict[str, Any]] = []
 
-        jump_points = []
         for item in self.recored_data:
-            direction = JUMP_ACTION_DIRECTION.get(item.get("action"))
+            direction = self.JUMP_ACTION_DIRECTION.get(item["action"])
             if direction is None:
                 continue
-    
-            x, y = item["loc"]
-            jump_points.append({"loc": (x, y), "direction": direction})
-        print(f"跳躍點數量：{len(jump_points)}")
-        print("跳躍點清單",jump_points)
-        return jump_points
-    #=================
-    # 主要邏輯
-    #=================
-    def run(self,state: GameState) -> tuple[Optional[str], Optional[dict]]:
-        '''
-        Args:
-            state (GameState): 包含當前角色位置、血量、ROI 範圍及怪物清單的資料容器。
-        '''
-        #===========
-        # 每輪資訊更新
-        #===========
-        
-        if state.mini_player_loc:   #角色座標更新
-            self.mini_player_loc = state.mini_player_loc
-        current_time =time.time()   #時間標籤
 
-        #依賴檢查
-        if self.mini_player_loc is None or self.platforms is None:
-            logging.warning("缺失自動化必要信息，跳過此幀")
+            x, y = item["loc"]
+            action_points.append({
+                "loc": (x, y),
+                "direction": direction,
+            })
+
+        logging.info("Loaded %d action points", len(action_points))
+        return action_points
+
+    # ------------------------------------------------------------------
+    # Main update loop
+    # ------------------------------------------------------------------
+
+    def run(self, state: GameState) -> ActionResult:
+        """Process one game-state packet and return the action for this frame."""
+        if state.mini_player_loc is not None:
+            self.mini_player_loc = tuple(state.mini_player_loc)
+
+        current_time = time.time()
+
+        # Do not use ``if not self.mini_player_loc`` here: (0, 0) is a valid
+        # coordinate and must not be treated as missing data.
+        if self.mini_player_loc is None or not self.platforms:
+            logging.warning(
+                "Missing player position or platform data; skipping this frame"
+            )
             return None, None
 
-        if self.current_platform is None:
-            self.current_platform = self._check_current_platform() #判斷人在哪一個平台
+        # Refresh the platform every frame so the cached index cannot become stale.
+        self.current_platform = self._check_current_platform()
 
-
-
-        #===========
-        # 管理模組: 健康模組
-        #===========
-        # 健康資料給 HealthManager 去做判斷
-        health_action = self.health_manager.run(state.player_hp,state.player_mp,current_time)
-
+        # Health actions have priority over normal state-machine decisions.
+        health_action = self.health_manager.run(
+            state.player_hp, state.player_mp, current_time
+        )
         if health_action is not None:
             return health_action
 
-        # 從狀態機中取出目前的狀態與參數，回傳給 GameBot模組
-        action, params = self.bot_state.handle(state)   
+        return self.bot_state.handle(state)
 
-        return action, params 
+    # ------------------------------------------------------------------
+    # Unstuck / recovery helpers
+    # ------------------------------------------------------------------
 
-    #=================
-    # 邏輯塊: 脫困功能
-    #=================
+    def _unstuck_player(self) -> ActionResult:
+        """Try to recover when the player is outside known geometry or stuck."""
+        self.current_platform = self._check_current_platform()
+        passage_index = self._check_vertical_passage()
 
-    #TODO:暫時堪用，但不夠好，至少做到在繩子中的情況下能百分百脫困，以及後半平台返回的邏輯好像吃不到
+        # Retain the original recovery policy: random movement when the player
+        # is not currently inside a known vertical passage.
+        if passage_index is None:
+            return self._random_move()
 
-    def _unstuck_player(self):
-            '''
-            功能:
-                人物超出範圍、人物不動時、觸發防卡邏輯
-            '''
-            # 更新一下目前在哪一個平台
-            self.current_platform = self._check_current_platform()
-            is_in_vertical_passage = self._check_vertical_passage()
+        if self.current_platform is None:
+            platform_index = self._find_nearest_platform()
+            if platform_index is not None:
+                return self._move_to_platform(platform_index)
+            return None, None
 
-            # 情況A : 人物在垂直通道卡住
-            if is_in_vertical_passage is None:
-                return self._random_move()
+        return self._random_move()
 
-            # 情況B: 人物在平台卡住
-            if self.current_platform is None:
-                # 移動至最近平台
-                result = self._find_nearest_platform()
-                if result is not None:
-                    result = self._move_to_platform(result)
-                    return result
-                else:
-                    return None, None
-            
-            # 情況C: 其他
-            else:
-                return self._random_move()
-    
-    def _random_move(self):
-        '''
-        功能:
-            給_unstuck_player 使用
-            用list拼出隨機移動
-        '''
-        action_list = ["JUMP","MOVE"]
-        action_direction_list = ["RIGHT","LEFT"]
-        action = random.choice(action_list)
-        direction = random.choice(action_direction_list)
+    def _random_move(self) -> tuple[str, dict[str, Any]]:
+        """Choose a random jump or horizontal movement action."""
+        action = random.choice(("JUMP", "MOVE"))
+        direction = random.choice(("RIGHT", "LEFT"))
         return self._pack_action(action, direction=direction)
-    
-    def _find_nearest_platform(self):
-        """
-        功能:
-            根據玩家目前的座標找最近的平台
-        return:
-            傳回最近平台的index 
-        """
 
-        px , py = self.mini_player_loc
+    def _find_nearest_platform(self) -> Optional[int]:
+        """Return the platform rectangle nearest to the player's current position."""
+        if self.mini_player_loc is None or not self.platforms:
+            return None
 
-        nearest_platform_index = None
-        #跟找怪邏輯一樣，從無限距離開始判斷
-        nearest_distance = float('inf')
+        px, py = self.mini_player_loc
+        nearest_index: Optional[int] = None
+        nearest_distance = float("inf")
 
-        for index, plat in enumerate(self.platforms):
+        for index, platform in enumerate(self.platforms):
+            left, top = platform["t_l"]
+            right, bottom = platform["b_r"]
 
-            left, top = plat["t_l"]
-            right, bottom = plat["b_r"]
-
-            if left <= px <= right:
-                dx = 0
-            else:
-                dx = min(abs(px - left), abs(px - right))
-            dy = min(abs(py - top), abs(py - bottom))
-
-            distance = (dx ** 2 + dy ** 2) ** 0.5
+            # Distance from a point to a rectangle. The gap on an axis is zero
+            # when the point is already within that axis' bounds.
+            dx = max(left - px, 0, px - right)
+            dy = max(top - py, 0, py - bottom)
+            distance = (dx * dx + dy * dy) ** 0.5
 
             if distance < nearest_distance:
                 nearest_distance = distance
-                nearest_platform_index  = index
+                nearest_index = index
 
-        return nearest_platform_index 
-    
-    def _move_to_platform(self, platform_index)-> tuple[Optional[str], Optional[dict]]:
-        '''
-        功能:控制人物移動到目標平台
-        arges: 
-            verti_passage_index: 垂直通道的index
-        return:
-            self._pack_action("MOVE", direction="RIGHT"or "LEFT")
-        '''
-        if self.mini_player_loc:
-            px , _ = self.mini_player_loc
+        return nearest_index
 
-            # (1) 防卡:防止被怪物攻擊而阻斷移動狀態，發一個"閒置停止"的指令，觸發脈衝
-            stuck_action =self._give_pulse_to_stuck()
-            if stuck_action is not None:
-                return stuck_action
+    def _move_to_platform(self, platform_index: int) -> ActionResult:
+        """Move horizontally toward the selected platform."""
+        if self.mini_player_loc is None:
+            return None, None
+        if not 0 <= platform_index < len(self.platforms):
+            logging.warning("Invalid platform index: %s", platform_index)
+            return None, None
 
-            # (2) 主邏輯
-            if px < self.platforms[platform_index]["t_l"][0]:
-                return self._pack_action("MOVE", direction="RIGHT")
-            else:
-                return self._pack_action("MOVE", direction="LEFT")
-        return None
-    
-    def _give_pulse_to_stuck(self):
-        ''' 
-        功能:
-            人物座標沒變化，則產生脈衝
-        效果:
-            若人物卡住，發一個"閒置停止"的指令，產生脈衝
-        '''
+        # If movement appears blocked, release movement briefly to create a pulse.
+        stuck_action = self._give_pulse_to_stuck()
+        if stuck_action is not None:
+            return stuck_action
+
+        px, _ = self.mini_player_loc
+        platform_left = self.platforms[platform_index]["t_l"][0]
+        if px < platform_left:
+            return self._pack_action("MOVE", direction="RIGHT")
+        return self._pack_action("MOVE", direction="LEFT")
+
+    def _give_pulse_to_stuck(self) -> Optional[tuple[str, dict[str, Any]]]:
+        """Send a stop pulse when the player's mini-map position stops changing."""
+        if self.mini_player_loc is None:
+            return None
+
         current_time = time.time()
 
-        # 記錄第一次"上次位置"，初始化卡住計時器
         if self.last_player_loc is None:
             self.last_player_loc = self.mini_player_loc
             self.detect_move_stuck_timer = current_time
             return None
-        
-        # 變動監測
+
         if self.last_player_loc != self.mini_player_loc:
             self.last_player_loc = self.mini_player_loc
             self.detect_move_stuck_timer = current_time
-            return None 
-        
-        if current_time - self.detect_move_stuck_timer > 1.5:
-            print("人物位置沒有變化，重新觸發脈衝")
+            return None
+
+        if current_time - self.detect_move_stuck_timer > STUCK_TIMEOUT:
+            logging.warning("Player has not moved; sending a stop pulse")
             self.last_player_loc = self.mini_player_loc
-            self.detect_move_stuck_timer  = current_time
-            return self._pack_action("IDLE",command="STOP_MOVE")
-        
+            self.detect_move_stuck_timer = current_time
+            return self._pack_action("IDLE", command="STOP_MOVE")
+
+        return None
+
     def _is_loc_y_change(self) -> bool:
-        '''
-        功能:
-            用上次的Y軸位置與現在的Y軸位置判斷是否移動
-            
-        return 
-            True | False
-        '''
+        """Return whether the player's mini-map Y coordinate changed since last check."""
+        if self.mini_player_loc is None:
+            return False
 
+        current_y = self.mini_player_loc[1]
         if self.last_player_y_loc is None:
-            self.last_player_y_loc = self.mini_player_loc[1]
-            return True  
+            self.last_player_y_loc = current_y
+            return True
 
-        changed = self.last_player_y_loc != self.mini_player_loc[1]
-        self.last_player_y_loc = self.mini_player_loc[1]
+        changed = self.last_player_y_loc != current_y
+        self.last_player_y_loc = current_y
         return changed
 
-    #=================
-    # 邏輯塊: 垂直移動相關
-    #=================
+    # ------------------------------------------------------------------
+    # Vertical passage navigation
+    # ------------------------------------------------------------------
 
     def _find_nearest_verti_passage(self) -> Optional[int]:
-        """
-        功能:
-            先找目前平台內最近的垂直通道
-        要求:
-            self.mini_player_loc
-            self.current_platform
-        return: 
-            平台引所對應的index 
-            
-        注意: 判定通道的頂部或底部，需要有任一端點落在平台的垂直範圍內
-        """
-        if not self.mini_player_loc or not self.vertical_passage:
+        """Find the nearest vertical passage reachable from the current platform."""
+        if self.mini_player_loc is None or not self.vertical_passage:
             return None
-        # 先找目前平台
+
         self.current_platform = self._check_current_platform()
-        px, py = self.mini_player_loc
-
-        # 先試著找「跟目前平台 x 範圍有重疊」的通道，這些是人物可移動到的
-        reachable_candidates = []
-
-        if self.current_platform is not None:  # 一定藥用 not noe 因為 index 是0計數，0會被判別 false
-
-            plat = self.platforms[self.current_platform]
-
-            plat_left, plat_right = plat["t_l"][0], plat["b_r"][0]
-            plat_top, plat_bottom = plat["t_l"][1], plat["b_r"][1] 
-
-            for index, passage in enumerate(self.vertical_passage):
-                verti_left, verti_right = passage["t_l"][0], passage["b_r"][0]
-                verti_top, verti_bottom = passage["t_l"][1], passage["b_r"][1]
-
-                x_overlap = not (verti_right < plat_left or verti_left > plat_right)
-                y_touch = (plat_top  <= verti_top <= plat_bottom  ) or (plat_top <= verti_bottom <= plat_bottom)
-
-                if x_overlap and y_touch:
-                    reachable_candidates.append(index)
-
-        # 如果當前平台內沒有對應的垂直通道，直接回傳 None
-        if not reachable_candidates:
-            print("找不到鄰近的垂直通道")
+        if self.current_platform is None:
             return None
 
-        nearest_verti_passage_index = None
-        nearest_distance = float('inf')
+        px, py = self.mini_player_loc
+        platform = self.platforms[self.current_platform]
+        platform_left, platform_top = platform["t_l"]
+        platform_right, platform_bottom = platform["b_r"]
+
+        reachable_candidates: list[int] = []
+
+        for index, passage in enumerate(self.vertical_passage):
+            passage_left, passage_top = passage["t_l"]
+            passage_right, passage_bottom = passage["b_r"]
+
+            x_overlap = not (
+                passage_right < platform_left or passage_left > platform_right
+            )
+            y_touches = (
+                platform_top <= passage_top <= platform_bottom
+                or platform_top <= passage_bottom <= platform_bottom
+            )
+
+            if x_overlap and y_touches:
+                reachable_candidates.append(index)
+
+        if not reachable_candidates:
+            logging.debug("No reachable vertical passage found on this platform")
+            return None
+
+        nearest_index: Optional[int] = None
+        nearest_distance = float("inf")
 
         for index in reachable_candidates:
-            plat = self.vertical_passage[index]
-            left, top = plat["t_l"]
-            right, bottom = plat["b_r"]
+            passage = self.vertical_passage[index]
+            left, top = passage["t_l"]
+            right, bottom = passage["b_r"]
 
-            if left <= px <= right:
-                dx = 0
-            else:
-                dx = min(abs(px - left), abs(px - right))
-            dy = min(abs(py - top), abs(py - bottom))
-
-            distance = (dx ** 2 + dy ** 2) ** 0.5
+            dx = max(left - px, 0, px - right)
+            dy = max(top - py, 0, py - bottom)
+            distance = (dx * dx + dy * dy) ** 0.5
 
             if distance < nearest_distance:
                 nearest_distance = distance
-                nearest_verti_passage_index = index
+                nearest_index = index
 
-        return nearest_verti_passage_index
+        return nearest_index
 
-    def _move_to_verti_passage(self, verti_passage_index)-> tuple[Optional[str], Optional[dict]]:
-        '''
-        功能:
-            控制人物移動到目標垂直通道範圍內
-        arges: 
-            verti_passage_index: 垂直通道的index
-        return:
-            self._pack_action("MOVE", direction="RIGHT"or "LEFT")
-        '''
-
-        px, py = self.mini_player_loc # 人物座標
-
-        # 判斷: 移動到繩索區可能遇到地形卡住，所以這裡寫了跳躍點的地形判斷
-        for index, point in enumerate(self.action_points):
-            jx, jy = point["loc"]
-            if abs(jx - px) <= 2.5 and abs(jy - py) <= 2:  # 遊戲有不可控的像素誤差
-                direction = self.action_points[index]["direction"]
-                if direction == "NONE":
-                    return self._pack_action("JUMP", direction=direction)
-
-
-
-        my_verti_passage = self._check_vertical_passage()
-        # (1) 防卡:防止被怪物攻擊而阻斷移動狀態，發一個"閒置停止"的指令，觸發脈衝
-        stuck_action =self._give_pulse_to_stuck()
-        if stuck_action is not None:
-            return stuck_action
-        print(f"目前垂直通道:{my_verti_passage}  目標垂直通道:{verti_passage_index}")
-        # (2) 主邏輯
-        if my_verti_passage == verti_passage_index: 
-
-            return self._pack_action("IDLE",command="RELEASE_ALL")
-        if px < self.vertical_passage[verti_passage_index]["t_l"][0]:
-            print(f"玩家座標:{px}；走至座標:{self.vertical_passage[verti_passage_index]['t_l'][0]}")
-            return self._pack_action("MOVE", direction="RIGHT")
-        else:
-            print(f"玩家座標:{px}；走至座標:{self.vertical_passage[verti_passage_index]['t_l'][0]}")
-            return self._pack_action("MOVE", direction="LEFT")
-        
-    # TODO: 封存,待跳抓狀態機取消測試完畢後確認是否刪除或恢復
-    # #=================
-    # # 邏輯塊: 單點跳躍相關(JumpLeft/JumpRight)
-    # #=================
-
-    # def _check_jump_point(self) -> Optional[int]:
-    #     '''
-    #     功能:
-    #         判斷玩家目前座標是否已經落在某個跳躍點的抵達容忍範圍內
-    #     要求:
-    #         self.mini_player_loc
-    #         self.action_points
-    #     return:
-    #         跳躍點的index | None
-    #     '''
-    #     if not self.mini_player_loc or not self.action_points:
-    #         return None
-
-    #     px, py = self.mini_player_loc
-    #     threshold = self.ACTION_POINT_RANGE  # <== 容忍範圍，還要抓合適的參數
-
-    #     for index, point in enumerate(self.action_points):
-    #         jx, jy = point["loc"]
-    #         if abs(px - jx) <= threshold and abs(py - jy) <= threshold:
-    #             return index
-        
-    #     return None
-
-    # def _find_nearest_jump_point(self) -> Optional[int]:
-    #     '''
-    #     功能:
-    #         在玩家目前座標附近，找出最近的單點跳躍點
-    #     要求:
-    #         self.mini_player_loc
-    #         self.jump_points
-    #     return:
-    #         最近跳躍點的index | None (超出搜尋範圍或沒有跳躍點時回傳None)
-    #     '''
-    #     if not self.mini_player_loc or not self.action_points:
-    #         return None
-
-    #     px, py = self.mini_player_loc
-    #     nearest_index = None
-    #     nearest_score = float('inf')
-
-    #     for index, point in enumerate(self.action_points):
-    #         jx, jy = point["loc"]
-
-    #         dx = px  - jx
-    #         dy = py - jy
-
-    #         y_weight = 5
-    #         score = (dx ** 2 + (dy * y_weight) ** 2) ** 0.5
-
-    #         if score < nearest_score:
-    #             nearest_score = score
-    #             nearest_index = index
-
-    #     # 太遠的跳躍點不採用，避免人物跑去很遠的地方硬跳
-    #     if nearest_index is not None:
-    #         jx, jy = self.action_points[nearest_index]["loc"]
-    #         actual_distance = ((px - jx) ** 2 + (py - jy) ** 2) ** 0.5
-    #         if actual_distance <= self.JUMP_DISTANCE_THRESHOLD:
-    #             return nearest_index
-
-    #     return None
-
-    # def _move_to_jump_point(self, jump_index) -> tuple[Optional[str], Optional[dict]]:
-    #     '''
-    #     功能:控制人物移動到目標跳躍點座標
-    #     args:
-    #         jump_index: 跳躍點的index
-    #     return:
-    #         self._pack_action("MOVE", direction="RIGHT" or "LEFT")
-    #     '''
-    #     if not self.mini_player_loc:
-    #         return None, None
-
-    #     # (1) 防卡:防止被怪物攻擊而阻斷移動狀態，發一個"閒置停止"的指令，觸發脈衝
-    #     stuck_action = self._give_pulse_to_stuck()
-    #     if stuck_action is not None:
-    #         return stuck_action
-
-    #     # (2) 主邏輯
-    #     px, _ = self.mini_player_loc
-    #     jx, _ = self.action_points[jump_index]["loc"]
-
-    #     if px < jx  :
-    #         return self._pack_action("MOVE", direction="RIGHT")
-    #     else:
-    #         return self._pack_action("MOVE",  direction="LEFT")
- 
-
-    # def _do_jump(self, jump_index) -> tuple[Optional[str], Optional[dict]]:
-    #     '''
-    #     功能:
-    #         已抵達跳躍點時，依紀錄的方向執行單次跳躍
-    #     args:
-    #         jump_index: 跳躍點的index
-    #     return:
-    #         self._pack_action("JUMP_GRAB", direction="RIGHT" |"LEFT"|"DOWN"|"UP"|M_RIGHT|M_LEFT)
-    #     '''
-    #     direction = self.action_points[jump_index]["direction"]
-    #     print(f"到達{jump_index}號跳躍點，執行 {direction} 方向跳躍")
-    #     return self._pack_action("JUMP_GRAB", direction=direction)
-
-
-    #=================
-    # 分類: 已與狀態機掛勾執行函式
-    #=================
-    def _enable_player_patrol(self)-> tuple[Optional[str], Optional[dict]]:
-        '''
-        功能:
-            人物開始巡邏
-        效果:
-            在平台範圍內左右移動
-        需求:
-            - self.mini_player_loc : 人物座標
-            - self.current_platform : 當前平台index
-        '''
-        # 依賴檢查：無平台資訊就拋棄此幀
-        # 若有平台，則更新最新平台(盡量別用快取)
-        current_plat_index = self._check_current_platform()
-        # ==========================
-        # 條件A:判斷人物是否站在跳躍點
-        # 目的: 偵測所有種類的跳躍點
-        # ==========================
-        px, py = self.mini_player_loc # 人物座標
-        for index, point in enumerate(self.action_points):
-            jx, jy = point["loc"]
-
-            if abs(jx - px) <= 2.5 and abs(jy - py) <= 2:  # 遊戲有不可控的2像素誤差
-                direction = self.action_points[index]["direction"]
-
-                if direction == "NONE":
-                    return self._pack_action("JUMP", direction=direction)
-                elif direction == "M2LEFT" or direction == "M2RIGHT":
-                    return self._pack_action("SMALL_MOVE", direction=direction)
-                elif direction == "DOWN":
-                    return self._pack_action("JUMP", direction=direction)
-                elif direction == "LEFT" or direction == "RIGHT":
-                    return self._pack_action("JUMP", direction=direction)
-                
-        # 條件B: 人物不再平台
-        if current_plat_index is None :
-            self.current_platform =  None 
-            return None,None
-        
-        self.current_platform = current_plat_index  # 更新全域狀態的最新平台
-
-        plat_index = self.current_platform
-        current_plat = self.platforms[plat_index]
-        
-        left_bound = current_plat["t_l"][0] 
-        right_bound = current_plat["b_r"][0]
-
-        #=====
-        #   平台內人物的四種情況
-        # 1.最左邊與最左邊+緩衝值之間 2.最右邊與最右邊-緩衝值之間 1.最左邊+緩衝值 2.最右邊-緩衝值  
-        #=====
-        if px <= left_bound + self.buffer:  
-            self.search_direction = "RIGHT"
-
-            return self._pack_action("MOVE", direction="RIGHT")
-
-
-        elif right_bound - self.buffer <= px:  
-            self.search_direction = "LEFT" 
-
-            return self._pack_action("MOVE", direction="LEFT")
-
-        # 下面兩個判斷拿掉也無影響，但保險起見還是放著
-        elif px < left_bound + self.buffer :
-            self.search_direction = "RIGHT"  
-            return self._pack_action("MOVE", direction="RIGHT")
-
-
-        elif px > right_bound - self.buffer:
-            self.search_direction = "LEFT"    
-            return self._pack_action("MOVE", direction="LEFT")
-
-        # 其他情況
-        else:
-            return self._pack_action("MOVE", direction=self.search_direction)
-        
-    def _fk_that_mob(self,state):
-        '''
-        功能:
-            計算與怪物距離，判斷目標並攻擊
-        '''
-        # 依賴檢查：無平台資訊就拋棄此幀
-        if not state.player_center_loc:
+    def _move_to_verti_passage(self, verti_passage_index: int) -> ActionResult:
+        """Move into a vertical passage, executing a nearby plain-jump point first."""
+        if self.mini_player_loc is None:
             return None, None
-        if state.roi_BBOX is None:
+        if not 0 <= verti_passage_index < len(self.vertical_passage):
+            logging.warning("Invalid vertical-passage index: %s", verti_passage_index)
             return None, None
-        px, _ = state.player_center_loc
 
-        # -- 計算最近的怪物
-        best_target = None
-        total_mobs = 0 # 紀錄怪物數量
-        min_distance = float('inf') #從無限遠開始判斷
-
-        '''========================='''
-
-        for mob , mob_detail in state.mobs or []:
-            for detailed in mob_detail:
-                # 計算 ROI內多少怪物目標
-                total_mobs += 1
-
-                #計算怪物水平的絕對座標，
-                mx = detailed["top_left"][0] + state.roi_BBOX.x1
-
-                #絕對值求與玩家間的距離
-                distance = abs(px - mx)
-                if distance < min_distance:
-                    min_distance = distance
-                    #左右判斷
-                    direction = "RIGHT" if px < mx else "LEFT"
-                    best_target = {"name": mob, "distance": distance, "direction": direction}
-
-        #判斷:怪物是否在攻擊距離之內
-        if best_target and best_target['distance'] <= self.player_attack_range:
-            # 判斷:範圍攻擊
-            if self.ENABLE_AOE_ATTACK:
-                if total_mobs >= self.AOE_THRESHOLD:
-
-                    aoe_command = {
-                        "name": None, 
-                        "distance": None,
-                        "direction": "AOE_ATTACK"
-                    }
-                    return "ATTACK" , aoe_command
-            # 判斷:普通攻擊
-            match = re.match(r'^[a-zA-Z\s]+',best_target["name"])
-            if match :
-                mob_name = match.group(0).strip()
-                print(f"目標 {mob_name} 在攻擊範圍內 距離: {best_target['distance']} 方向: {best_target['direction']}")
-            else:
-                    print(f"目標 {best_target["name"]} 在攻擊範圍內 距離: {best_target['distance']} 方向: {best_target['direction']}")   
-            return "ATTACK" , best_target
-
-        if self.current_platform is None: # 不在攻擊平台內，停止移動，防止一系列檢測失敗的錯誤回傳
-            return self._pack_action("IDLE",command="STOP_MOVE")
-        
-        left_bound,right_bound = self.platforms[self.current_platform]["t_l"][0],self.platforms[self.current_platform]["b_r"][0]
-        mini_px = state.mini_player_loc[0]
-        if  mini_px <= left_bound + self.buffer:  
-            self.search_direction = "RIGHT"
-            return self._pack_action("MOVE", direction="RIGHT")
-        elif right_bound - self.buffer <= mini_px :  
-            self.search_direction = "LEFT" 
-            return self._pack_action("MOVE", direction="LEFT")
-        
-        # -- 接近無法打到的目標怪物
-        return self._pack_action("MOVE", direction=best_target['direction']) 
-
-    def _verti_movement(self,index):
-        """
-        功能:
-            垂直移動邏輯
-        行為:
-            1. 判斷往上/往下
-            2.偵測左走抓繩/右走抓繩
-        """
-
-        # -- 時間計算
-        if self._verti_movement_timer is None:
-            self._verti_movement_timer = time.time()
-        current_time = time.time()
-        # -- 數據計算
-        current_verti_passage = self.vertical_passage[index]
         px, py = self.mini_player_loc
 
-        top = current_verti_passage["t_l"][1]
-        bottom = current_verti_passage["b_r"][1]
-        mid_y = (top + bottom) // 2
-        central_axis = current_verti_passage["t_l"][0] + (current_verti_passage["b_r"][0] - current_verti_passage["t_l"][0]) // 2
+        # A plain jump point may be needed to clear terrain before reaching the rope.
+        for point in self.action_points:
+            jx, jy = point["loc"]
+            at_action_point = (
+                abs(jx - px) <= ACTION_POINT_X_TOLERANCE
+                and abs(jy - py) <= ACTION_POINT_Y_TOLERANCE
+            )
+            if at_action_point and point["direction"] == "NONE":
+                return self._pack_action("JUMP", direction="NONE")
 
-        # -- 固定上下的方向
+        current_passage = self._check_vertical_passage()
+        if current_passage == verti_passage_index:
+            return self._pack_action("IDLE", command="RELEASE_ALL")
+
+        stuck_action = self._give_pulse_to_stuck()
+        if stuck_action is not None:
+            return stuck_action
+
+        passage_left = self.vertical_passage[verti_passage_index]["t_l"][0]
+        if px < passage_left:
+            return self._pack_action("MOVE", direction="RIGHT")
+        return self._pack_action("MOVE", direction="LEFT")
+
+    # ------------------------------------------------------------------
+    # Patrol and combat
+    # ------------------------------------------------------------------
+
+    def _enable_player_patrol(self) -> ActionResult:
+        """Patrol left and right while keeping the player inside the platform."""
+        if self.mini_player_loc is None:
+            return None, None
+
+        px, py = self.mini_player_loc
+        current_platform_index = self._check_current_platform()
+
+        # Handle configured action points before ordinary patrol movement.
+        for point in self.action_points:
+            jump_x, jump_y = point["loc"]
+            at_action_point = (
+                abs(jump_x - px) <= ACTION_POINT_X_TOLERANCE
+                and abs(jump_y - py) <= ACTION_POINT_Y_TOLERANCE
+            )
+            if not at_action_point:
+                continue
+
+            direction = point["direction"]
+            if direction in ("NONE", "DOWN", "LEFT", "RIGHT"):
+                return self._pack_action("JUMP", direction=direction)
+            if direction in ("M2LEFT", "M2RIGHT"):
+                return self._pack_action("SMALL_MOVE", direction=direction)
+
+        if current_platform_index is None:
+            self.current_platform = None
+            return None, None
+
+        self.current_platform = current_platform_index
+        platform = self.platforms[current_platform_index]
+        left_bound = platform["t_l"][0]
+        right_bound = platform["b_r"][0]
+
+        if px <= left_bound + self.buffer:
+            self.search_direction = "RIGHT"
+        elif px >= right_bound - self.buffer:
+            self.search_direction = "LEFT"
+
+        return self._pack_action("MOVE", direction=self.search_direction)
+
+    def _fk_that_mob(self, state: GameState) -> ActionResult:
+        """Find the nearest visible mob; attack it or move toward it."""
+        if state.player_center_loc is None or state.roi_BBOX is None:
+            return None, None
+
+        player_x, _ = state.player_center_loc
+        best_target: Optional[dict[str, Any]] = None
+        total_mobs = 0
+        min_distance = float("inf")
+
+        for mob_name, mob_details in (state.mobs or []):
+            for mob_detail in mob_details:
+                total_mobs += 1
+                # Mob coordinates are ROI-relative; convert them to screen coordinates.
+                mob_x = mob_detail["top_left"][0] + state.roi_BBOX.x1
+                distance = abs(player_x - mob_x)
+                direction = "RIGHT" if player_x < mob_x else "LEFT"
+
+                if distance < min_distance:
+                    min_distance = distance
+                    best_target = {
+                        "name": mob_name,
+                        "distance": distance,
+                        "direction": direction,
+                    }
+
+        # No visible targets: do not index best_target or issue a move toward it.
+        if best_target is None:
+            return None, None
+
+        if best_target["distance"] <= self.player_attack_range:
+            if self.ENABLE_AOE_ATTACK and total_mobs >= self.AOE_THRESHOLD:
+                aoe_command = {
+                    "name": None,
+                    "distance": None,
+                    "direction": "AOE_ATTACK",
+                }
+                return "ATTACK", aoe_command
+
+            logging.info(
+                "Target %s is in attack range (distance: %.1f, direction: %s)",
+                best_target["name"],
+                best_target["distance"],
+                best_target["direction"],
+            )
+            return "ATTACK", best_target
+
+        if self.current_platform is None:
+            return self._pack_action("IDLE", command="STOP_MOVE")
+
+        left_bound, right_bound = (
+            self.platforms[self.current_platform]["t_l"][0],
+            self.platforms[self.current_platform]["b_r"][0],
+        )
+        mini_player_x = (
+            self.mini_player_loc[0] if self.mini_player_loc is not None else None
+        )
+
+        if mini_player_x is not None and mini_player_x <= left_bound + self.buffer:
+            self.search_direction = "RIGHT"
+            return self._pack_action("MOVE", direction="RIGHT")
+        if mini_player_x is not None and mini_player_x >= right_bound - self.buffer:
+            self.search_direction = "LEFT"
+            return self._pack_action("MOVE", direction="LEFT")
+
+        return self._pack_action("MOVE", direction=best_target["direction"])
+
+    # ------------------------------------------------------------------
+    # Climbing
+    # ------------------------------------------------------------------
+
+    def _verti_movement(self, index: int) -> ActionResult:
+        """Choose rope-grab/climb actions and release controls at passage endpoints."""
+        if self.mini_player_loc is None:
+            return None, None
+        if not 0 <= index < len(self.vertical_passage):
+            logging.warning("Invalid vertical-passage index: %s", index)
+            return None, None
+
+        now = time.time()
+        if self._verti_movement_timer is None:
+            self._verti_movement_timer = now
+
+        passage = self.vertical_passage[index]
+        px, py = self.mini_player_loc
+
+        top = passage["t_l"][1]
+        bottom = passage["b_r"][1]
+        middle_y = (top + bottom) // 2
+        center_x = (
+            passage["t_l"][0]
+            + (passage["b_r"][0] - passage["t_l"][0]) // 2
+        )
+
         if self.current_verti_target is None:
-            self.current_verti_target = "UP" if py > mid_y else "DOWN"
+            self.current_verti_target = "UP" if py > middle_y else "DOWN"
 
-        #容忍值
-        TOP_TOLERANCE = 5
-        BOTTOM_TOLERANCE = 5
-        TIME_THRESHOLD = 0.3
-        # -- 決策邏輯
-        # -- 往上        
+        top_tolerance = 5
+        bottom_tolerance = 5
+        time_threshold = 0.3
+
+        # IMPORTANT: read/update the previous Y coordinate once per frame.
+        # The old code called _is_loc_y_change() several times in one decision,
+        # so the first call consumed the change and later calls saw False.
+        y_changed = self._is_loc_y_change()
+        if y_changed:
+            self._verti_movement_timer = now
+
+        elapsed = now - self._verti_movement_timer
+
         if self.current_verti_target == "UP":
-            # 下面兩個if，目的為判斷有沒有成功到頂(底)部
-            if self._is_loc_y_change(): # <= - 有變動則重置
-                self._verti_movement_timer = current_time
-            if  current_time - self._verti_movement_timer > TIME_THRESHOLD:
-                '''
-                給偵測餘裕
-                超過1秒，判斷人物是否Y軸移動，沒移動代表在底部
-                '''
-                #到達底部，重置狀態
-                if not self._is_loc_y_change(): #< - 偵測是否移動
-                    self.current_verti_target = None 
-                    self._verti_movement_timer = None
-                    self.last_player_loc = None
-                    print("到達底部")
-                    return self._pack_action("IDLE", command="RELEASE_ALL")
-            
-            #條件 : 人物處於下層區與 且 y軸沒變動
-            if  bottom - BOTTOM_TOLERANCE <= py <= bottom and not self._is_loc_y_change():
-                '''功能: 找繩子爬繩'''
-                if px <= central_axis :
-                    print(f'方向:{self.current_verti_target}，找繩子')
-                    return self._pack_action("ROPE", direction="RIGHT_UP")
-                elif px >= central_axis :
-                    print(f'方向:{self.current_verti_target}，找繩子')
-                    return self._pack_action("ROPE", direction="LEFT_UP")
+            # If vertical movement has stopped for long enough, assume the upper
+            # endpoint has been reached and release the held controls.
+            if elapsed > time_threshold and not y_changed:
+                self.current_verti_target = None
+                self._verti_movement_timer = None
+                self.last_player_loc = None
+                logging.info("Reached the upper end of the vertical passage")
+                return self._pack_action("IDLE", command="RELEASE_ALL")
 
-            print(f'方向:{self.current_verti_target}，攀爬中')
-            return self._pack_action("CLIMB", direction=self.current_verti_target)
-        
-        # -- 往下
+            # At the lower end, move sideways to align with the rope before climbing.
+            if bottom - bottom_tolerance <= py <= bottom and not y_changed:
+                direction = "RIGHT_UP" if px <= center_x else "LEFT_UP"
+                return self._pack_action("ROPE", direction=direction)
+
+            return self._pack_action("CLIMB", direction="UP")
+
         if self.current_verti_target == "DOWN":
-            if  current_time - self._verti_movement_timer > TIME_THRESHOLD:
-                '''
-                條件A:
-                給偵測餘裕
-                超過1秒，判斷人物是否Y軸移動，沒移動代表在頂部
-                '''
-                # 下面兩個if，目的為判斷有沒有成功到頂(底)部
-                if self._is_loc_y_change(): # <= - 有變動則重置
-                    self._verti_movement_timer = current_time
+            if elapsed > time_threshold and not y_changed:
+                # The player has stopped moving vertically; release the controls.
+                self.current_verti_target = None
+                self._verti_movement_timer = None
+                self.last_player_loc = None
+                logging.info("Reached the lower end of the vertical passage")
+                return self._pack_action("IDLE", command="RELEASE_ALL")
 
-                #到達底部，重置狀態
-                if  current_time - self._verti_movement_timer > VERTI_MOVE_STAY_TIMEOUT:
-                    self.current_verti_target = None # < - 離開要重置
-                    self._verti_movement_timer = None
-                    self.last_player_loc = None
-                    print("到達底部")
-                    return self._pack_action("IDLE", command="RELEASE_ALL")
-            
-            if  top <= py <= top + TOP_TOLERANCE:
-                #狀態改變:找繩子
+            # At the upper end, move sideways to align with the rope before descending.
+            if top <= py <= top + top_tolerance:
+                direction = "RIGHT_DOWN" if px <= center_x else "LEFT_DOWN"
+                return self._pack_action("ROPE", direction=direction)
 
-                if px <= central_axis   :
-                    print(f'向右，找往下繩子')
-                    return self._pack_action("ROPE", direction="RIGHT_DOWN")
-                elif px >= central_axis :
-                    print(f'向左，找往下繩子')
-                    return self._pack_action("ROPE", direction="LEFT_DOWN")
+            return self._pack_action("CLIMB", direction="DOWN")
 
-            print(f'方向:{self.current_verti_target}，攀爬中')
-            return self._pack_action("CLIMB", direction=self.current_verti_target)
+        return None, None
 
-        return None
-    #=================
-    # 分類: 狀態機判斷
-    #=================
+    def is_stuck(self) -> bool:
+        """Return True if the player's position has not changed for 1.5 seconds."""
+        if self.mini_player_loc is None:
+            return False
 
-    def is_stuck(self):
-        current_time = time.time()
+        now = time.time()
 
         if self.last_player_loc is None:
             self.last_player_loc = self.mini_player_loc
-            self.detect_move_stuck_timer = current_time
+            self.detect_move_stuck_timer = now
             return False
 
-        if self.last_player_loc != self.mini_player_loc: #< -- 人物位置變化
-
+        if self.last_player_loc != self.mini_player_loc:
             self.last_player_loc = self.mini_player_loc
-            self.detect_move_stuck_timer = current_time
-            return False 
+            self.detect_move_stuck_timer = now
+            return False
 
-        # 時間間隔（Threshold）判定
-        if current_time - self.detect_move_stuck_timer > 1.5:
-            return True
-        return False
+        return now - self.detect_move_stuck_timer > STUCK_TIMEOUT
+
+    # ------------------------------------------------------------------
+    # Position checks
+    # ------------------------------------------------------------------
 
     def _check_vertical_passage(self) -> Optional[int]:
-        '''
-        功能:
-            根據玩家目前的座標
-            判斷玩家在哪個垂直通道內
-        returns: 
-            傳回垂直通道的index|None
-        '''
-        if not self.mini_player_loc or not self.vertical_passage:
+        """Return the index of the vertical passage containing the player."""
+        if self.mini_player_loc is None:
             return None
 
-        px, py = self.mini_player_loc 
-
-        for index, vert in enumerate(self.vertical_passage):
-            left, top = vert["t_l"]     
-            right, bottom = vert["b_r"] 
-
+        px, py = self.mini_player_loc
+        for index, passage in enumerate(self.vertical_passage):
+            left, top = passage["t_l"]
+            right, bottom = passage["b_r"]
             if left <= px <= right and top <= py <= bottom:
-
-                return index  
+                return index
 
         return None
 
-    def _check_current_platform(self):
-        """
-        功能:
-            根據玩家目前的座標
-            判斷人在哪一個平台內
-        """
-        if not self.mini_player_loc or not self.platforms:
+    def _check_current_platform(self) -> Optional[int]:
+        """Return the index of the platform containing the player."""
+        if self.mini_player_loc is None:
             return None
 
-        px, py = self.mini_player_loc 
-
-        for index, plat in enumerate(self.platforms):
-            left, top = plat["t_l"]     
-            right, bottom = plat["b_r"] 
-
+        px, py = self.mini_player_loc
+        for index, platform in enumerate(self.platforms):
+            left, top = platform["t_l"]
+            right, bottom = platform["b_r"]
             if left <= px <= right and top <= py <= bottom:
-                return index  
+                return index
 
         return None
 
-    def _check_climbing_up(self):
-        '''
-        功能:
-            檢查是否在攀爬向上的狀態
-        '''
-        # -- 時間計算
+    def _check_climbing_up(self) -> ActionResult:
+        """Continue climbing upward until vertical movement stops at the top."""
+        if self.mini_player_loc is None:
+            return None, None
+
+        now = time.time()
         if self._verti_movement_timer is None:
-            self._verti_movement_timer = time.time()
-        current_time = time.time()
-        if self._is_loc_y_change(): # <= - 有變動則重置
-            self._verti_movement_timer = current_time
-        #條件:超過X秒，判斷人物是否Y軸移動，沒移動代表在頂部
-        if  current_time - self._verti_movement_timer > VERTI_MOVE_STAY_TIMEOUT :
+            self._verti_movement_timer = now
 
-            #到達底部，重置狀態
-            if not self._is_loc_y_change(): #< - 偵測是否移動
-                self.current_verti_target = None # < - 離開要重置
-                self._verti_movement_timer = None
-                self.last_player_loc = None
-                print("到達頂部")
-                return self._pack_action("IDLE", command="RELEASE_ALL")
+        # Only inspect the Y-coordinate once per invocation (one decision frame).
+        y_changed = self._is_loc_y_change()
+        if y_changed:
+            self._verti_movement_timer = now
+
+        if (
+            now - self._verti_movement_timer > VERTI_MOVE_STAY_TIMEOUT
+            and not y_changed
+        ):
+            self.current_verti_target = None
+            self._verti_movement_timer = None
+            self.last_player_loc = None
+            logging.info("Reached the upper end of the vertical passage")
+            return self._pack_action("IDLE", command="RELEASE_ALL")
+
         return self._pack_action("CLIMB", command="UP")
 
+    # ------------------------------------------------------------------
+    # Action output / debug helpers
+    # ------------------------------------------------------------------
 
-    #=================
-    # 工具
-    #=================
-    def _pack_action(self, action_type, **kwargs):
-        """
-        將行為打包成字典
-        """
+    @staticmethod
+    def _pack_action(action_type: str, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+        """Package an action name and its parameters for the control module."""
         return action_type, kwargs
 
-    def get_debug_geometry(self):
-        '''
-        給Gamebot的座標資料封包
-        '''
+    def get_debug_geometry(self) -> list[dict[str, Any]]:
+        """Return platform, passage, and action-point geometry for GameBot debug UI."""
         return [
-            {"label": "platform", "color": (193,255,193),   "boxes": [(p["t_l"], p["b_r"]) for p in self.platforms]},
-            {"label": "vertical_passage", "color": (0,100,0), "boxes": [(v["t_l"], v["b_r"]) for v in self.vertical_passage]},
-            {"label": "jump", "color": (3,193,69), "circle": [j["loc"] for j in self.action_points]}
+            {
+                "label": "platform",
+                "color": (193, 255, 193),
+                "boxes": [
+                    (platform["t_l"], platform["b_r"])
+                    for platform in self.platforms
+                ],
+            },
+            {
+                "label": "vertical_passage",
+                "color": (0, 100, 0),
+                "boxes": [
+                    (passage["t_l"], passage["b_r"])
+                    for passage in self.vertical_passage
+                ],
+            },
+            {
+                "label": "jump",
+                "color": (3, 193, 69),
+                "circle": [point["loc"] for point in self.action_points],
+            },
         ]
-    def _reset_state(self):
-        '''
-        從狀態機發出的重置按鍵指令
-        '''
-        return self._pack_action("IDLE",command="RELEASE_ALL")
+
+    def _reset_state(self) -> tuple[str, dict[str, Any]]:
+        """Release all held keys; used by the state machine during transitions."""
+        return self._pack_action("IDLE", command="RELEASE_ALL")

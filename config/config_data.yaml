@@ -1,7 +1,7 @@
-# 選擇地圖
-quickly_choice_map: The_Burnt_Land_I
+# Selected map
+quickly_choice_map: East_Rocky_Mountain_IV
 
-# 設定的地圖路徑
+# Configured map paths
 map:
 
   Hunting_Ground_I: img/map/Hunting_Ground_I

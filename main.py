@@ -1,5 +1,5 @@
 import ctypes
-# 強制讓 Python 程式識別真實的螢幕 DPI 像素，避免抓圖範圍縮水
+# Force Python process to recognize actual screen DPI pixels to avoid cropped capture bounds
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except:
@@ -12,18 +12,15 @@ import src.utils.logger as logger
 import logging
 import os
 import sys
-    #=================
-    # 作業系統管理員權限
-    #=================
+
 def is_admin():
-    """檢查當前是否擁有管理員權限"""
+
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
     except:
         return False
 
 def run_as_admin():
-    """以管理員權限重新執行當前"""
 
     script = os.path.abspath(sys.argv[0])
     params = ' '.join([f'"{arg}"' for arg in sys.argv[1:]])
@@ -32,21 +29,20 @@ def run_as_admin():
 
 if __name__ == "__main__":
     try:
-        # 啟動日誌
+        # Initialize logging
         logger.setup_logging()
-        #---管理員權限
+        #--- Administrator privileges
         if not is_admin():
             run_as_admin()
             sys.exit()
         try:
-
             run = GameBot()
             run.run()
         except Exception as e:
-            logging.exception(f"未預期的例外錯誤: {e}")
+            logging.exception(f"Unexpected exception: {e}")
         except KeyboardInterrupt:
-            logging.info("'Ctrl+C'中斷程式")
-            logging.info("正常關閉")
+            logging.info("Interrupted by 'Ctrl+C'")
+            logging.info("Shut down cleanly")
 
     except Exception as e:
-        logging.exception(f"main.py發生未預期的例外錯誤: {e}")
+        logging.exception(f"Unexpected exception in main.py: {e}")

@@ -18,23 +18,24 @@ import yaml
 
 
 '''
-還不確定是測試用，還是模組一部分。
+Operation logger.
+Bridges real-time game screen with MinimapDetector.py, recording player coordinates and action logs.
 
-fuction:橋接遊戲即時畫面與 MinimapDetector.py，紀錄我的座標與操作紀錄。
+Default modes: walk : walk; rope : rope point; jump_down : jump down directly
 
-先預設 幾種模式  walk : 走路 ; rope : 繩子點 ; ; jump_down : 直接跳下
-
-[注意!] 連續兩個 walk 會判定為平台; 連續兩個rope會判定為垂直通道。確保walk "高度" 差不多，而rope x軸要一樣
+[NOTE!] Two consecutive 'walk' actions are treated as a platform; two consecutive 'rope' actions are treated as a vertical channel.
+Ensure walk points share approximately the same height (Y), and rope points share the same X coordinate.
  
-[Example] ... -> walk -> walk -> rope -> rope 這樣兩個walk會判定為平台，平台才會觸發戰鬥模式；兩個rope點會判定為垂直通道
+[Example] ... -> walk -> walk -> rope -> rope:
+Two walk points form a platform (combat mode is triggered only on platforms); two rope points form a vertical channel.
 
-熟建:
-
-F5 設立走位點
-F6 設立爬繩點向上
-F7 設立爬繩點向下
-F8 設立跳下點
-F12 儲存行為座標於minimap目錄下
+Hotkeys:
+F1  Save action coordinates under minimap directory
+F2  Exit application
+F4  Set walk point
+F5  Set rope point
+F6  Set jump point
+F7  Set jump down point
 '''
 
 
@@ -42,38 +43,38 @@ F12 儲存行為座標於minimap目錄下
 class OperationLogger:
     def __init__(self):
 
-        #---視窗設定
+        #--- Window settings
         self.game_title = config.get("game.title")
         self.hwnd = None
         self.frame_size = None
-        #---路徑設定
+        #--- Path settings
         self.map_name = config.get("quickly_choice_map")
         self.map_url = Path(config.get(f"mini_map.{self.map_name}"))
         self.mini_map = cv2.imread(str(self.map_url))
-        #--- 模組實例
+        #--- Module instances
         self.minimap_detector = None
         self.hk = None
 
-        #--- 資料容器
+        #--- Data containers
         self.player_loc = None
         self.recored_data = []
 
     #=================
-    # 初始化與加載資源
+    # Initialization and Resource Loading
     #=================
     def _connect_window(self):
         '''
-        掛勾遊戲視窗
+        Hook game window
         '''
         self.hwnd,_ =  get_window_handle_and_rect_by(self.game_title)
         if self.hwnd :
-            logging.info(f"成功讀取遊戲標題: {self.game_title }，視窗句柄: {self.hwnd}")
+            logging.info(f"Successfully loaded game title: {self.game_title}, window handle: {self.hwnd}")
         else:
-            logging.info(f"未匹配到指定窗口{self.game_title }")
+            logging.info(f"Specified window not found: {self.game_title}")
 
     def _scan_full_screen(self):
         '''
-        hwnd 讀取遊戲視窗，並取得新的遊戲畫面
+        Read game window via hwnd and capture new game frame
         '''
         try:
 
@@ -83,18 +84,18 @@ class OperationLogger:
             screen_rect  = (client_tl[0], client_tl[1], client_br[0], client_br[1])
 
         except Exception as e:
-            logging.error(f"螢幕讀取錯誤:{e}")
+            logging.error(f"Screen capture error: {e}")
             return None
         
-        #抓圖-轉陣-轉BRG
+        # Capture - to array - to BGR
 
         current_frame = ImageGrab.grab(bbox=screen_rect)
         current_frame = np.array(current_frame)
-        frame_bgr = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR) #影像處理預設都是BGR
+        frame_bgr = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR) # Image processing defaults to BGR
 
         if frame_bgr is not None:
 
-            # 記錄畫面尺寸
+            # Record frame dimensions
             if self.frame_size is None:
                 y, x = frame_bgr.shape[:2]  # (height, width)
                 self.frame_size = (x ,y)
@@ -104,10 +105,10 @@ class OperationLogger:
         return frame_bgr
 
     def _loading_config(self):
-        #--載入模組
+        #-- Load modules
         self.minimap_detector = MinimapDetector()
         self.hk = hk.HotkeyManager()
-        #--熟建載入
+        #-- Load hotkeys
         key_mappings = {
             win32con.VK_F1: self._save_actions_to_yaml,
             win32con.VK_F2: self._exit_app,
@@ -122,10 +123,10 @@ class OperationLogger:
         
         for vk, func in key_mappings.items():
             self.hk.register(vk, func)
-    # === 螢幕操作
+    # === Screen Operations
     def _setting_cv2_map(self):
         '''
-        預先幫cv2 設立空視窗，可以拉長變形、拖曳窗口
+        Pre-create empty OpenCV windows with adjustable size and position
         '''
         cv2.namedWindow("Min_iMap", cv2.WINDOW_NORMAL)
         cv2.moveWindow("Min_iMap", 1500, 0)
@@ -135,21 +136,21 @@ class OperationLogger:
 
     def _draw_map(self):
         '''
-        功能:
-            匯出各種咚咚
+        Function:
+            Display various visualizations
         '''
         cv2.imshow("Min_iMap", self.mini_map)
         self.draw_recorded_points(self.mini_map)
         cv2.imshow("Big_Map", self.frame_bgr)
         self.draw_recorded_points
-        cv2.putText(self.frame_bgr, f"人物座標: {self.player_loc}", org=(10, 275),
+        cv2.putText(self.frame_bgr, f"Player Pos: {self.player_loc}", org=(10, 275),
             fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=2, color=(0, 0, 255), thickness=2)
     def _is_window_valid(self):
         if not win32gui.IsWindow(self.hwnd):
-            logging.info("沒有偵測到窗口")
+            logging.info("Window not detected")
             return False
         if win32gui.IsIconic(self.hwnd):
-            logging.info("沒有偵測到窗口")
+            logging.info("Window not detected")
             return False
         rect = win32gui.GetClientRect(self.hwnd)
         if rect[2] < 100 or rect[3] < 100:
@@ -159,7 +160,7 @@ class OperationLogger:
     def run(self):
 
         #pre_process
-        # 強制讓 Python 程式識別真實的螢幕 DPI 像素，避免抓圖範圍縮水
+        # Force Python process to recognize actual screen DPI pixels to avoid cropped capture bounds
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
         except:
@@ -180,64 +181,64 @@ class OperationLogger:
 
     def screen_loop(self):
         '''
-        全螢幕刷新
-        
+        Full screen refresh loop
         '''
         
         try:
             while True:
-                #==防呆保護==================
+                #== Guard check ==================
                 if not self._is_window_valid():
                     time.sleep(1)
                     continue
-                #==按鍵監聽==================
+                #== Key listener ==================
                 self.hk.poll() 
-                #==畫面更新==================
+                #== Frame update ==================
                 self.frame_bgr = self._scan_full_screen()
-                #==主邏輯====================
+                #== Main logic ====================
 
                 player_loc = self.MinimapDetector(self.frame_bgr)
                 self.player_loc = player_loc
                 self._show_player_loc(self.player_loc)
                 
                 #===========================
-                #畫面更新
+                # Frame display
                 self._draw_map()
                 cv2.waitKey(1)
 
         except Exception as e:
-            logging.error(f"screen_loop 發生例外錯誤: {e}", exc_info=True)
+            logging.error(f"Exception occurred in screen_loop: {e}", exc_info=True)
         finally:
             cv2.destroyAllWindows()
 
     def MinimapDetector(self,frame)-> tuple[int,int]:
         '''
-        與小圖偵測模組進行互動：傳送當前BGR圖
-        return : 人物位置(x,y)
+        Interact with minimap detector: send current BGR frame
+        return: player position (x, y)
         '''
         result = self.minimap_detector.run(frame)
         return result
     
     def _show_player_loc(self,player_loc):
         
-        cv2.putText(self.frame_bgr, f"人物座標: {player_loc}", org=(10, 275),
+        cv2.putText(self.frame_bgr, f"Player Pos: {player_loc}", org=(10, 275),
                     fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=2, color=(0, 0, 255), thickness=2)
     def draw_recorded_points(self, frame):
         '''
-        功能: 將自定義的記錄座標畫在畫面上，
-        並將連續兩個 walk 畫成平台 BBOX，連續兩個 rope 畫成通道 BBOX。
+        Function: Draw user-defined recorded coordinates on the frame,
+        drawing two consecutive walk points as a platform bounding box,
+        and two consecutive rope points as a channel bounding box.
         '''
         if not self.recored_data:
             return frame
 
-        # 1. 單獨點畫出
+        # 1. Draw individual points
         for index, item in enumerate(self.recored_data, start=1):
             loc = item.get('loc')
             action = item.get('action')
             
             if loc is not None:
                 x, y = int(loc[0]), int(loc[1])
-                #預設顏色(防CTD)
+                # Default colors (prevent crash)
 
                 if action == "walk":
                     color = (128, 128, 128)
@@ -255,7 +256,7 @@ class OperationLogger:
 
 
 
-        # 2. 連續點畫出
+        # 2. Draw consecutive points
         for i in range(len(self.recored_data) - 1):
             current_item = self.recored_data[i]
             next_item = self.recored_data[i + 1]
@@ -272,12 +273,12 @@ class OperationLogger:
             x1, y1 = int(curr_loc[0]), int(curr_loc[1])
             x2, y2 = int(next_loc[0]), int(next_loc[1])
             
-            # 判斷情況 A：連續兩個 walk -> 判定為平台 
+            # Condition A: Two consecutive walks -> Platform
             if curr_action == "walk" and next_action == "walk":
-                # 以兩個點為對角線畫一個矩形
+                # Draw rectangle with two points as diagonals
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 1)
 
-            # 判斷情況 B：連續兩個 rope -> 判定為垂直通道
+            # Condition B: Two consecutive ropes -> Vertical channel
             elif curr_action == "rope" and next_action == "rope":
 
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 1)
@@ -288,11 +289,11 @@ class OperationLogger:
                             
 
     #=================
-    # 熟鍵綁定
+    # Hotkey Bindings
     #=================
     def _walk_point(self):
         '''
-        平台移動點
+        Platform movement point
         '''
 
         self.recored_data.append({"loc": list(self.player_loc), "action": "walk"})
@@ -301,7 +302,7 @@ class OperationLogger:
 
     def _rope_point(self):
         '''
-        爬繩點
+        Rope climb point
         '''
 
         self.recored_data.append({"loc": list(self.player_loc), "action": "rope"})
@@ -310,7 +311,7 @@ class OperationLogger:
 
     def _jump_point(self):
         '''
-        @brief 單純跳
+        @brief Simple jump
         '''
 
         self.recored_data.append({"loc": list(self.player_loc), "action": "Jump"})
@@ -320,7 +321,7 @@ class OperationLogger:
 
     def _jump_down_point(self):
         '''
-        @brief 向下方跳
+        @brief Jump down
         '''
 
         self.recored_data.append({"loc": list(self.player_loc), "action": "JumpDown"})
@@ -329,7 +330,7 @@ class OperationLogger:
 
     def _jump_up_point(self):
         '''
-        向上跳
+        Jump up
         '''
 
         self.recored_data.append({"loc": list(self.player_loc), "action": "JumpUp"})
@@ -338,7 +339,7 @@ class OperationLogger:
 
     def _jump_to_right_point(self):
         '''
-        向右跳
+        Jump right
         '''
         self.recored_data.append({"loc": list(self.player_loc), "action": "JumpRight"})
         self._show_last_item()
@@ -346,7 +347,7 @@ class OperationLogger:
 
     def _jump_to_left_point(self):
         '''
-        向左跳
+        Jump left
         '''
         self.recored_data.append({"loc": list(self.player_loc), "action": "JumpLeft"})
         self._show_last_item()
@@ -354,7 +355,7 @@ class OperationLogger:
 
     def small_move_to_right(self):
         '''
-        @brief 小位移向右
+        @brief Small move right
         '''
         self.recored_data.append({"loc": list(self.player_loc), "action": "M_RIGHT"})
         self._show_last_item()
@@ -362,52 +363,52 @@ class OperationLogger:
 
     def small_move_to_left(self):
         '''
-        @brief 小位移向左
+        @brief Small move left
         '''
         self.recored_data.append({"loc": list(self.player_loc), "action": "M_LEFT"})
         self._show_last_item()
         self._show_recorded_data()
 
     #=================
-    # 文書操作
+    # Text Output
     #=================
     def print_msg(self):
 
         print("=" * 45)
-        print(" 遊戲操作與座標記錄器已啟動 - 快捷鍵說明：")
+        print(" Game Operation & Coordinate Logger - Hotkey Guide:")
         print("=" * 45)
-        print(" [F1] 儲存行為座標至 YAML")
-        print(" [F2] 離開程式")
-        print(" [F4] 動作點：Walk (移動點)")
-        print(" [F5] 動作點：Rope (爬繩點)")
-        print(" [F6] 動作點：Jump(單純跳躍)")
+        print(" [F1] Save action coordinates to YAML")
+        print(" [F2] Exit application")
+        print(" [F4] Action point: Walk (movement point)")
+        print(" [F5] Action point: Rope (climb point)")
+        print(" [F6] Action point: Jump (simple jump)")
 
         print("=" * 45)
 
 
     def _show_last_item(self):
-        if self.recored_data:  # 確保清單不是空的，避免報錯
+        if self.recored_data:  # Ensure list is not empty to avoid errors
             self.recored_data_list = self.recored_data[-1]
-            print(f"最後一個記錄 -> 動作點: {self.recored_data_list.get('action')}, 座標: {self.recored_data_list.get('loc')}")
+            print(f"Last recorded -> Action: {self.recored_data_list.get('action')}, Pos: {self.recored_data_list.get('loc')}")
 
     def _show_recorded_data(self):
         '''
-        功能:
-            顯示所儲存的數據
+        Function:
+            Display recorded data
         '''
         print("=" * 30)
-        print(" 目前已記錄的操作資料：")
+        print(" Currently recorded operation data:")
 
         for index, item in enumerate(self.recored_data, start=1):
-            action = item.get('action', '未知動作')
-            loc = item.get('loc', '無座標')
-            print(f" [{index:2d}] 動作: {action:<15} | 座標: {loc}")
+            action = item.get('action', 'Unknown')
+            loc = item.get('loc', 'No Pos')
+            print(f" [{index:2d}] Action: {action:<15} | Pos: {loc}")
 
         print("=" * 30)
 
     def _save_actions_to_yaml(self):
         '''
-        把座標與行為，儲存為ymal格式
+        Save coordinates and actions to YAML format
         '''
         folder_path = self.map_url.parent
         yaml_path = folder_path / f"{self.map_name}.yaml"
@@ -415,49 +416,47 @@ class OperationLogger:
         try:
             with open(yaml_path, "w") as f:
                 yaml.dump(self.recored_data, f)
-            print(f"檔案儲存成功，儲存檔案路徑:{yaml_path}")
+            print(f"File saved successfully, path: {yaml_path}")
 
         except Exception as e:
-            logging.error(f"儲存資料錯誤:{e}")
+            logging.error(f"Error saving data: {e}")
         pass
 
     def _exit_app(self):
         '''
-        功能:關掉程式
+        Function: Exit application
         '''
-        logging.info("正在關閉應用程式...")
+        logging.info("Closing application...")
         self.bot_enabled = False
         
-        # 銷毀所有 OpenCV 視窗
+        # Destroy all OpenCV windows
         cv2.destroyAllWindows()
         import sys
         sys.exit(0)
 
     #=================
-    # 作業系統管理員權限
+    # OS Administrator Privileges
     #=================
 def is_admin():
-    """檢查當前是否擁有管理員權限"""
+    """Check if currently running with administrator privileges."""
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
     except:
         return False
 
 def run_as_admin():
-    """以管理員權限重新執行當前腳本"""
+    """Rerun current script with administrator privileges."""
     script = os.path.abspath(sys.argv[0])
     params = ' '.join([f'"{arg}"' for arg in sys.argv[1:]])
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script}" {params}', None, 1)
 
 if __name__ == "__main__":
-        #---管理員權限
+        #--- Administrator privileges
         if not is_admin():
             run_as_admin()
             sys.exit()
-        #---日誌模組
+        #--- Logger module
         logger.setup_logging()
         #--- run
         run = OperationLogger()
         run.run()
-
-

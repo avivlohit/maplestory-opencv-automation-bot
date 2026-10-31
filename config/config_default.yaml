@@ -1,10 +1,10 @@
-
 game:
-  title: "新楓之谷：經典版"
+  # Window title for MapleStory (Change to your exact client title, e.g., "MapleStory" or "MapleStory Worlds")
+  title: "FortySevenMS"
 
 player_setting:
-  #喝水設定 key:按鍵 Vale:觸發血線，低於就喝對應藥水
-  #常用按鍵 ''delete"  "page down" "page up" "end" "home"
+  # Potion threshold settings: key = keystroke, value = HP/MP percentage (0-100) below which potion triggers
+  # Common keys: "delete", "pagedown", "pageup", "end", "home", "insert"
   health_setting:
     light:
       key: null
@@ -26,84 +26,76 @@ player_setting:
       key: "pagedown"
       value: 20
 
-  #戰鬥設置
+  # Combat settings
   auto_control_config:
-    #功能:鏢賊跳射(跳躍攻擊) True:打開 False:關閉
+    # Jump-attack toggle (e.g. Night Lord / Assassin jump-shot): True = ON, False = OFF
     is_Night_Lord: False
 
-    #功能: 使用範圍攻擊技能 True:打開 False:關閉
+    # AOE skill toggle: True = ON, False = OFF
     enable_AOE: True
-    AOE_threshold: 3  # 設定判斷ROI範圍內"大於等於"此數值，使用AOE技能
+    AOE_threshold: 3  # Trigger AOE when mob count in ROI >= this value
 
-    #人物的攻擊範圍(像素) 參考: 近戰:100-150 遠程:200-500 
+    # Character attack range in pixels. Reference: Melee: 100-150, Ranged: 200-500
     attack_range: 110
 
-
 image_processing:
-#圖像匹配度設置，抓不到怪物或角色，或者抓太多目標，可在這邊調適
-  
-  #怪物匹配最小值
-  mob_min_threshold : 0.95
-  #人物匹配最小值
-  role_min_threshold : 0.7
+  # Template matching confidence thresholds (adjust if missing targets or getting false positives)
+  mob_min_threshold: 0.95
+  role_min_threshold: 0.7
 
 game_bot:
-  
-  #roi範圍的位移量 ，要在減少運算/加大偵測怪物範圍間取捨
-  #參考: 近戰 100-200 遠程 300-500  
+  # ROI bounding box offsets from character center
+  # Balance between CPU usage and mob detection coverage. Reference: Melee 100-200, Ranged 300-500
   roi_x_offset_l_width: 300
   roi_x_offset_r_width: 300
   roi_y_offset_t_high: 150
   roi_y_offset_b_high: 40
 
 auto_control_config:
-
-  #尋怪功能開關 True/False
+  # Mob search toggle: True/False
   TOGGLE_PATROL_ACTION: True
 
-  #打怪功能開關 True/False
+  # Combat action toggle: True/False
   TOGGLE_COMBAT_ACTION: True
 
-  #允許進行平台移動的時間閾值:單位(秒) ； 若間隔時間內沒有怪物，進入移動狀態
-  find_mob_time_threshold : 15
+  # Platform transition timeout in seconds: if no mob is found within this time, transition platforms
+  find_mob_time_threshold: 15
 
-  #人物卡住檢查間隔時間:單位(秒); 巡邏狀態中，超過這個時間，觸發防卡頓動作
-  stuck_check_time_threshold : 2
+  # Unstuck check interval in seconds: triggers unstuck action if stationary during patrol
+  stuck_check_time_threshold: 2
 
-  #邊界距離緩衝:單位:像素;人物若進入緩衝區會往反方向移動，避免離開打怪區間
+  # Platform boundary buffer in pixels: character turns around when within buffer distance from platform edge
   buffer: 3
-health_detector:
 
-  #健康條的座標；解析度、DPI設定都會影響判定範圍，若發現判定不準，需自行測量範圍
-  hp_bar_loc : [475, 750, 631, 760]
-  mp_bar_loc : [643, 750, 799, 760]
-  #血條顏色範圍
+# Minimap crop offset relative to the game window client area (top-left corner)
+minimap:
+  crop_offset: [6, 72]  # [x1, y1] relative to client area
+
+health_detector:
+  # Health/Mana bar pixel coordinates [x1, y1, x2, y2]
+  # NOTE: Resolution and DPI affect these coordinates. Recalibrate if bar position differs.
+  hp_bar_loc: [475, 750, 631, 760]
+  mp_bar_loc: [643, 750, 799, 760]
+
+  # HP bar color HSV bounds (Red)
   lower_hp_color: [0, 200, 200]
   upper_hp_color: [5, 255, 255]
-  #藍條顏色範圍
+
+  # MP bar color HSV bounds (Blue)
   lower_mp_color: [100, 132, 90]
   upper_mp_color: [107, 255, 255]
 
 keyboard:
-  #鍵盤按鍵設定 (不知道設定甚麼，使用tools/keyboard_check.py 測試按鍵)
+  # Keybindings (test key names with tools/keyboard_check.py)
   left: left
   right: right
   up: up
   down: down
-  attack: shift
-  aoe_attack: ctrl
-  pick_up: z
+  attack: z
+  aoe_attack: z
+  pick_up: n
   jump: alt
 
-
-
 folder_path:
-  template_nametag_path: img/nametag/example.png # 預設捕獲角色模板
-  my_character_template_path: img/nametag/MyRoleNameTag.png  # 使用中的人物角色模板
-
-  # =============== 跳躍點參數封存 ===============
-  # # 跳躍距離閾值，太遠容易抓到很遠的跳躍點(有可能頻繁卡住)，太近又容易偵測不到
-  # JUMP_DISTANCE_THRESHOLD: 15 
-  # # 跳躍點範圍;大小會影響偵測跳躍點時的判定。
-  # ACTION_POINT_RANGE : 2
-  # =============================================
+  template_nametag_path: img/nametag/example2.png # Template used by nametag capture tool
+  my_character_template_path: img/nametag/MyRoleNameTag.png  # Active character nametag template

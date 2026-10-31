@@ -13,8 +13,7 @@ import numpy as np
 from PIL import ImageGrab
 import time
 '''
-可以用滑快來選取座標與範圍
-或是直接輸入座標
+Select coordinates and bounds interactively with mouse ROI selection or direct coordinate input.
 '''
 
 ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -27,31 +26,31 @@ time.sleep(1)
 bring_to_front_and_center_origin(hwnd)
 print(hwnd, client_rect)
 
-#相對座標
+# Relative coordinates
 screen_rect = win32gui.GetClientRect(hwnd)
 
 print(f"screen_rect: {screen_rect}")
-#絕對座標
+# Absolute coordinates
 abs_x2, abs_y2 = win32gui.ClientToScreen(hwnd, (screen_rect[2], screen_rect[3]))
 x1,y1 = win32gui.ClientToScreen(hwnd, (screen_rect[0], screen_rect[1]))
 x2,y2 = win32gui.ClientToScreen(hwnd, (screen_rect[2], screen_rect[3]))
 abd_lect = (x1,y1,x2,y2)
 current_frame = ImageGrab.grab(bbox=abd_lect)
 current_frame = np.array(current_frame)
-frame_bgr = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR) #影像處理預設都是BGR
+frame_bgr = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR) # Image processing defaults to BGR
 
-# 拖拉滑鼠框選要當 template 的區域，選完按 Enter 或 Space 確認，按 c 取消
-roi = cv2.selectROI("拖曳框選 HP 條區域，選完按 Enter", frame_bgr, showCrosshair=True)
+# Drag mouse to select template area, press Enter/Space to confirm, c to cancel
+roi = cv2.selectROI("Drag to select HP bar ROI, press Enter when done", frame_bgr, showCrosshair=True)
 
-#直接輸入座標
+# Direct coordinate input
 # x1, y1, x2, y2 = (620, 789, 724, 800)
 w = x2 - x1
 h = y2 - y1
-print(f"座標: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
+print(f"Coordinates: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
 
 cropped = frame_bgr[y1:y2, x1:x2]
 cv2.imwrite("hp_template.png", cropped)
-print("已存檔 hp_template.png")
+print("Saved hp_template.png")
 
 cv2.imshow("TEST", frame_bgr)
 cv2.waitKey(0)

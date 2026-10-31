@@ -12,7 +12,7 @@ class MobInfo:
 @dataclass
 class GameState:
     '''
-    放一輪掃描後的快照
+    Snapshot of a single scan cycle
     '''
     player_center_loc : Optional[tuple[int,int]] = None
     player_hp : Optional[float] = None

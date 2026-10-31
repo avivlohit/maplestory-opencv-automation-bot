@@ -1,8 +1,8 @@
 from typing import Optional
 '''
-功能:
-    記錄觸發進出垂直通道的事件
-    只有進去及進出時觸發
+Function:
+    Track enter/leave events for vertical passages
+    Triggers only on transitions (entering / leaving)
 '''
 class ZoneTracker:
 
@@ -31,8 +31,8 @@ class ZoneTracker:
     @staticmethod
     def _find_zone(player_loc, zones):
         """
-        共用的座標比對邏輯
-        返回的是一個引所值
+        Shared coordinate matching logic
+        Returns matching zone index
         """
         if not zones:
             return None

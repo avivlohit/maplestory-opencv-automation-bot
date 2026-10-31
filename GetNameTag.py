@@ -4,21 +4,21 @@ import os
 import sys
 import ctypes 
 '''
-暫時使用。 
-啟動模塊，抓取角色標籤，為用作名稱標籤以利匹配座標。
+Temporary script.
+Launches the module to capture the character name tag for coordinate template matching.
 '''
     #=================
-    # 作業系統管理員權限
+    # OS Administrator Privileges
     #=================
 def is_admin():
-    """檢查當前是否擁有管理員權限"""
+    """Check if currently running with administrator privileges."""
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
     except:
         return False
 
 def run_as_admin():
-    """以管理員權限重新執行當前"""
+    """Rerun current script with administrator privileges."""
 
     script = os.path.abspath(sys.argv[0])
     params = ' '.join([f'"{arg}"' for arg in sys.argv[1:]])
@@ -27,7 +27,7 @@ def run_as_admin():
 
 if __name__ == "__main__":
 
-    #---管理員權限
+    #--- Administrator privileges
     if not is_admin():
         run_as_admin()
         sys.exit()
@@ -35,4 +35,4 @@ if __name__ == "__main__":
         run = tools.get_nametag.GetRoleImg()
         run.run()
     except Exception as e:
-        logging.exception(f"未預期的例外錯誤: {e}")
+        logging.exception(f"Unexpected exception: {e}")

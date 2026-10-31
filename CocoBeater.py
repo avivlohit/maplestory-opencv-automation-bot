@@ -1,5 +1,6 @@
+from config.config_loader import config
 import ctypes
-# 強制讓 Python 程式識別真實的螢幕 DPI 像素，避免抓圖範圍縮水
+# Force Python process to recognize actual screen DPI pixels to avoid cropped capture bounds
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except:
@@ -23,68 +24,67 @@ import time
 import win32gui 
 '''
 WIP
-打可可果實腳本
+Coconut harvesting script
 
-起始點 142,51 
-第一顆果實  142,51 平打
-第二顆果實  152,58 平打
-第三顆果實  161,58 平打
-第三顆果實  176,54 平打
-
+Start point: 142, 51
+First fruit: 142, 51 normal attack
+Second fruit: 152, 58 normal attack
+Third fruit: 161, 58 normal attack
+Fourth fruit: 176, 54 normal attack
 '''
 class MaibBot:
 
 
 
     def __init__(self):
-        #視窗信息
-        self.game_title = "新楓之谷：經典版"
+        # Window info
+        self.game_title = config.get("game.title", "MapleStory")
         self.hwnd = None
         self.client_rec = None
 
-        #地圖容器
+        # Map container
         self.minimap = None
-        #畫面資訊
+        # Frame info
         self.frame_bgr = None
         self.frame_size = None
-        self.mini_player_loc = None # <- 人物座標
-        #模組實例容器
+        self.mini_player_loc = None # <- Player coordinates
+        # Module instance container
         self.map_detector = None
 
 
     def _instantiation(self):
         '''
-        模組實例化
+        Instantiate modules
         '''
         self.map_detector = MapDectector()
         self.minimap_detector = MinimapDetector()
         self.coco_task_manager = CocoTaskManager()
     def _load_res(self):
         '''
-        載入資源
+        Load resources
         '''
 
         self.minimap = self.map_detector.load_map()
 
     #=================
-    # 窗口處理
+    # Window Handling
     #=================
 
     def _setting_windows(self):
         '''
-        功能:
-            事前窗口校正與準備
-        取得:
-            遊戲窗柄
+        Function:
+            Pre-flight window calibration and preparation
+        Returns:
+            Game window handle
         '''
         self.hwnd = self.map_detector.connect_window()
         
     def _is_window_valid(self):
         if not win32gui.IsWindow(self.hwnd):
-            logging.info("沒有偵測到窗口")
+            logging.info("Window not detected")
             return False
         if win32gui.IsIconic(self.hwnd):
-            logging.info("沒有偵測到窗口")
+            logging.info("Window not detected")
             return False
         rect = win32gui.GetClientRect(self.hwnd)
         if rect[2] < 100 or rect[3] < 100:
@@ -93,60 +93,59 @@ class MaibBot:
 
     def _is_game_window_foreground(self):
         '''
-        檢查遊戲視窗目前是否為前景視窗
+        Check if game window is currently the foreground window
         '''
         return win32gui.GetForegroundWindow() == self.hwnd
-    
 
     
     def run(self):
 
-        #預處理
+        # Preprocessing
         self._instantiation()
         self._load_res()
         self._setting_windows()
 
-        #主程式
+        # Main program
         self.loop()
 
     def loop(self):
-        '''主迴圈'''
+        '''Main loop'''
         try:
             while True:
 
-                #窗口防呆
+                # Window guard check
 
-                #若窗口縮小，等待窗口還原
+                # If window minimized, wait for restore
                 if not self._is_window_valid():
                     time.sleep(1)
                     continue
 
-                # is_game_window_foreground = self._is_game_window_foreground() # 判斷本輪遊戲視窗是否在前景
+                # is_game_window_foreground = self._is_game_window_foreground() # Check if game window is in foreground this frame
                 # if not is_game_window_foreground and self.is_game_window_foreground_last_frame: 
                 #     self.keyboard.release_all()
                 #     self.keyboard.stop_move()
-                # self.is_game_window_foreground_last_frame = is_game_window_foreground  # 更新前景狀態
+                # self.is_game_window_foreground_last_frame = is_game_window_foreground  # Update foreground state
 
                 #===================
-                #資料蒐集
+                # Data collection
                 self.frame_bgr = self.map_detector.scan_full_screen()
                 self._get_window_rect()
                 self.mini_player_loc = self.MinimapDetector() 
                 self.coco_task_manager.process(self.mini_player_loc)
-                #圖片繪製
+                # Image rendering
                 # self._render_cv2_view()
                 # self._render_minimap_overlay(self.mini_player_loc)
         except Exception as e:
-            logging.error(f"視窗更新發生錯誤: {e}", exc_info=True)
+            logging.error(f"Error updating window: {e}", exc_info=True)
         finally:
             cv2.destroyAllWindows()
 
-    #渲染圖片
+    # Render image
 
     def _render_cv2_view(self):
         '''
-        功能:
-            統一渲染畫面
+        Function:
+            Unified view rendering
         '''
         try:
             if self.mini_player_loc is  None:
@@ -155,14 +154,14 @@ class MaibBot:
             cv2.imshow("CoCoBeater", self.frame_bgr)
             cv2.waitKey(1)
         except Exception as e:
-            print(f"渲染畫面發生錯誤: {e}")
-            logging.error(f"渲染畫面發生錯誤: {e}", exc_info=True)
+            print(f"Error rendering view: {e}")
+            logging.error(f"Error rendering view: {e}", exc_info=True)
 
     def _render_minimap_overlay(self,mini_player_loc):
         '''
-        小地圖渲染
+        Minimap rendering
         '''
-        #防呆:沒資料會導致CTD的，直接攔截
+        # Guard check: intercept missing data to prevent crash
         if self.minimap_detector.crop_frame_bgr is None or mini_player_loc is None:
             return
         overlay = self.minimap_detector.crop_frame_bgr.copy()
@@ -171,22 +170,22 @@ class MaibBot:
         cv2.circle(overlay, (mini_player_loc[0] , mini_player_loc[1]), 3, [255,255,0], 1)
         cv2.imshow("Minimap Debug", overlay)
     #=================
-    # 繪製函式
+    # Drawing Functions
     #=================
 
     def _show_player_loc(self,player_loc):
         
-        cv2.putText(self.frame_bgr, f"人物座標: {player_loc}", org=(10, 300),
+        cv2.putText(self.frame_bgr, f"Player Pos: {player_loc}", org=(10, 300),
                     fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, color=(255, 40, 0), thickness=2)
     #========
-    # 功能函式
+    # Helper Functions
     #========
 
     def _get_window_rect(self):
         '''
-        功能:
-            若沒有畫面尺寸，則偵測畫面尺寸並記錄
-        得到:
+        Function:
+            Detect and record frame size if not already set
+        Yields:
             self.frame_size
         '''
         if self.frame_bgr is not None and self.frame_size is None:
@@ -194,24 +193,24 @@ class MaibBot:
             self.frame_size = (x ,y)
 
     #=================
-    # 偵測器:小地圖
+    # Detector: Minimap
     #=================
     def MinimapDetector(self)-> tuple[int,int]:
         '''
         WIP
-        與小圖偵測模組進行互動：傳送當前BGR圖
-        return : 人物位置(x,y)
+        Interact with minimap detector: send current BGR frame
+        return: player position (x, y)
         '''
         mini_player_loc = self.minimap_detector.run(self.frame_bgr)
         return mini_player_loc
     
 class MapDectector:
     '''
-    處理圖像相關
+    Image-related processing
     '''
     def __init__(self):
-        #視窗信息
-        self.game_title = "新楓之谷：經典版"
+        # Window info
+        self.game_title = config.get("game.title", "MapleStory")
         self.hwnd = None
 
         self.frame_bgr = None   
@@ -220,7 +219,7 @@ class MapDectector:
 
     def load_map(self):
         '''
-        載入地圖
+        Load map
         '''
         map_name_is = "Florina_Beach_Lorang's_Sandy_Beach"
         minimap_folder = "img/mini_map"
@@ -228,10 +227,10 @@ class MapDectector:
         print(current_dir)
         minimap_dir= current_dir / minimap_folder / map_name_is / f"{map_name_is}.png"
         if minimap_dir.exists():
-            print("地圖載入成功")
+            print("Map loaded successfully")
 
         else:
-            e = f"{minimap_dir}不存在"
+            e = f"{minimap_dir} does not exist"
             print(e)
             logging.error(f"{e}")
 
@@ -240,31 +239,31 @@ class MapDectector:
 
     def connect_window(self):
         '''
-        功能:
-            hook 視窗，帶到前台(0,0)位置
+        Function:
+            Hook window and bring to foreground at (0, 0)
         return:
-            視窗句柄, 視窗尺寸
+            window handle, window rect
 
         '''
         self.hwnd, _ =  get_window_handle_and_rect_by(self.game_title)
 
         if self.hwnd :
             bring_to_front_and_center_origin(self.hwnd)
-            print(f"成功讀取遊戲標題: {self.game_title }，視窗句柄: {self.hwnd}")
-            logging.info(f"成功讀取遊戲標題: {self.game_title }，視窗句柄: {self.hwnd}")
+            print(f"Successfully loaded game title: {self.game_title}, window handle: {self.hwnd}")
+            logging.info(f"Successfully loaded game title: {self.game_title}, window handle: {self.hwnd}")
 
         else:
-            print(f"未匹配到指定窗口{self.game_title }")
-            logging.info(f"未匹配到指定窗口{self.game_title }")
+            print(f"Specified window not found: {self.game_title}")
+            logging.info(f"Specified window not found: {self.game_title}")
 
         return self.hwnd
     
     def scan_full_screen(self):
         '''
-        功能:
-            掃描遊戲畫面與更新
-        要求:
-            視窗與窗柄
+        Function:
+            Scan game screen and update
+        Requirements:
+            Window and handle
         '''
         try:
 
@@ -274,13 +273,13 @@ class MapDectector:
             screen_rect  = (client_tl[0], client_tl[1], client_br[0], client_br[1])
             self.client_window_tl = client_tl
         except Exception as e:
-            logging.error(f"screen_loop 發生例外錯誤: {e}", exc_info=True)
+            logging.error(f"Exception occurred in screen_loop: {e}", exc_info=True)
             return None
 
-        #抓圖-轉陣-轉BRG
+        # Capture - to array - to BGR
         current_frame = ImageGrab.grab(bbox=screen_rect)
         current_frame = np.array(current_frame)
-        frame_bgr = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR) #影像處理預設都是BGR
+        frame_bgr = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR) # Image processing defaults to BGR
 
         return frame_bgr
 
@@ -295,7 +294,7 @@ class MinimapDetector:
 
     def _load_minimap_config(self):
         '''
-        地圖載入
+        Load minimap
         '''
         try:
             #load map img
@@ -308,27 +307,27 @@ class MinimapDetector:
 
             self.minimap_template = cv2.imread(map,cv2.IMREAD_COLOR)
         except Exception as e:
-            logging.error(f"載入地圖失敗{e}")
+            logging.error(f"Failed to load map: {e}")
 
 
     def _crop_minimap(self,frame_bgr):
         '''
-        輸入: 全圖彩色
-        動作: 裁切小地圖範圍，並存入 self.crop_frame_bgr
+        Input: Full color image
+        Action: Crop minimap region and store in self.crop_frame_bgr
         '''
         h,w = self.minimap_template.shape[:2]
-        x1 , y1 = 6 , 72 #<-- 這邊寫死
+        crop_offset = config.get("minimap.crop_offset", [6, 72]); x1, y1 = crop_offset[0], crop_offset[1] #<-- Hardcoded here
         return frame_bgr[y1 : y1 + h, x1 : x1 + w]
 
     def run(self,frame_bgr):
 
         self.crop_frame_bgr = self._crop_minimap(frame_bgr)
 
-        #防呆:沒畫面就不偵測
+        # Guard check: skip detection if no frame
         if self.crop_frame_bgr is None:
             return
         
-        # 取得人物座標
+        # Get player coordinates
         player_loc = self._detect_player_loc(self.crop_frame_bgr)
 
         return player_loc
@@ -344,7 +343,7 @@ class MinimapDetector:
         if not contours:
             return None
 
-        # 過濾玩家色塊範圍
+        # Filter player color block range
         MIN_AREA, MAX_AREA = 2, 15
 
         candidates = []
@@ -357,7 +356,7 @@ class MinimapDetector:
             perimeter = cv2.arcLength(c, True)
             if perimeter == 0:
                 continue
-            circularity = 4 * np.pi * area / (perimeter ** 2)  # 1.0 = 完美圆形
+            circularity = 4 * np.pi * area / (perimeter ** 2)  # 1.0 = perfect circle
             if circularity < 0.5: 
                 continue
 
@@ -371,7 +370,7 @@ class MinimapDetector:
         if not candidates:
             return None
 
-        # 若有多個色塊範圍 選取離玩家設定最接近的
+        # If multiple color blocks found, select the one closest to player profile
         EXPECTED_AREA = 8
         best = min(candidates, key=lambda p: abs(p[2] - EXPECTED_AREA))
         return (best[0], best[1])
@@ -383,23 +382,23 @@ class MinimapDetector:
 class ActionController:
     def __init__(self):
         self.keyboard = Controller()
-        self.game_title = "新楓之谷：經典版"  # 遊戲標題
+        self.game_title = config.get("game.title", "MapleStory")  # Game title
         self.is_holding_z = False
 
     def _is_game_active(self):
-        """防呆：自己去抓當前前景視窗的標題，看是不是遊戲"""
+        """Guard check: check if current foreground window title matches game"""
         try:
             hwnd = win32gui.GetForegroundWindow()
             title = win32gui.GetWindowText(hwnd)
-            # 如果當前前景視窗標題包含你的遊戲名稱，才允許動作
+            # Only allow actions if current foreground window title contains game title
             return self.game_title in title
         except Exception:
             return False
 
     def press_key(self, key, duration=0.1):
-        """按下並放開按鍵（自帶防呆）"""
+        """Press and release key (with guard check)"""
         if not self._is_game_active():
-            print("防呆攔截：當前視窗不是遊戲，已略過按鍵")
+            print("Guard intercept: Current window is not game, keypress skipped")
             return
             
         self.keyboard.press(key)
@@ -407,7 +406,7 @@ class ActionController:
         self.keyboard.release(key)
 
     def jump_attack(self):
-        """跳打"""
+        """Jump attack"""
         if not self._is_game_active():
             return
             
@@ -419,11 +418,11 @@ class ActionController:
         self.keyboard.release(Key.ctrl)
 
     def normal_attack(self):
-        """平打）"""
+        """Normal attack"""
         self.press_key(Key.ctrl, 0.05)  
 
     def start_hold_z(self):
-        """啟動背景執行緒，持續按著 Z 鍵"""
+        """Start background thread to hold Z key continuously"""
         if self.is_holding_z:
             return
         
@@ -435,7 +434,7 @@ class ActionController:
                     self.keyboard.press('z')
                     time.sleep(0.1)
                 else:
-                    # 如果切出去聊天或看網頁，自動放開 Z 鍵，避免卡鍵
+                    # Release Z key automatically if switched away to avoid stuck keys
                     self.keyboard.release('z')
                     time.sleep(0.5)
             self.keyboard.release('z')
@@ -444,35 +443,35 @@ class ActionController:
         self.z_thread = threading.Thread(target=_hold, daemon=True)
         self.z_thread.start()
     def stop_hold_z(self):
-        """關閉背景的 Z 鍵持續按下"""
+        """Stop holding Z key in background"""
         self.is_holding_z = False
 
 
 class CocoTaskManager:
     '''
-    負責計算與果實的距離與發出動作
+    Responsible for calculating distance to fruit and triggering actions
     '''
     def __init__(self):
         self.action = ActionController()
         self.channel_count = 0
         #flat 
-        self.coco_beater_flag = False  #< - 開始打果實
-        self.change_flag = False #< - 切換頻道
+        self.coco_beater_flag = False  # <- Start hitting fruit
+        self.change_flag = False # <- Change channel
     def process(self, player_loc):
         '''
-        控制中樞
+        Control center
         '''
         if not player_loc:
             return
 
 
-        # 人物在原點 -> 開始腳本行動
+        # Player at origin -> Start script actions
         if self._start_position(player_loc) and not self.coco_beater_flag:
             self.coco_beater_flag = True
             self._auto_action(player_loc)
 
         time.sleep(3)
-        # 人物在終點 -> 準備切換頻道
+        # Player at destination -> Prepare to change channel
 
         if self._end_position(player_loc) and not self.change_flag:
             self.change_flag = True
@@ -480,8 +479,8 @@ class CocoTaskManager:
 
     def _start_position(self, player_loc, tolerance=2):
         """
-        檢查人物是否在初始原點附近
-        tolerance: 容許的誤差像素值（預設為 2）
+        Check if player is near initial origin
+        tolerance: Allowed error in pixels (default: 2)
         """
         if not player_loc:
             return False
@@ -489,30 +488,29 @@ class CocoTaskManager:
         target_x, target_y = 142, 51
         player_x, player_y = player_loc
 
-        # 檢查 X 軸與 Y 軸的距離是否都在誤差範圍內
+        # Check if X and Y distance are both within tolerance
         if abs(player_x - target_x) <= tolerance and abs(player_y - target_y) <= tolerance:
-            print(f"初始化原點 (當前座標: {player_loc})")
+            print(f"Origin reached (current pos: {player_loc})")
             return True
         else:
             return False
 
     def _auto_action(self,player_loc):
         '''
-        只是打個果實而已，就寫腳本就好了，有需要再系統化
-        錄製的腳本
+        Scripted coconut harvesting actions
         '''
 
-        count = 7  # 攻擊次數
+        count = 7  # Attack count
         self.action.start_hold_z()
-        #第一個果實 146, 51
+        # First fruit: 146, 51
         for i in range(count):
             time.sleep(0.5)
             self.action.normal_attack()
             time.sleep(0.5)
 
-        time.sleep(1) # 等待果實掉下來
+        time.sleep(1) # Wait for fruit to drop
 
-        #第二個果實 152, 58
+        # Second fruit: 152, 58
         self.action.press_key(Key.right,1.7)
         self.action.press_key(Key.left,0.1)
         for i in range(count):
@@ -520,14 +518,14 @@ class CocoTaskManager:
             self.action.normal_attack()
             time.sleep(0.5)
 
-        # 第三顆果實 176, 54
+        # Third fruit: 176, 54
         self.action.press_key(Key.right,0.7)
         for i in range(count):
             time.sleep(0.5)
             self.action.normal_attack()
             time.sleep(0.5)
 
-        # 第四顆果實 178, 54
+        # Fourth fruit: 178, 54
         self.action.press_key(Key.right,0.3)
         for i in range(5):
             time.sleep(0.5)
@@ -540,8 +538,8 @@ class CocoTaskManager:
 
     def _end_position(self, player_loc, tolerance=2):
         """
-        檢查人物是否在結束點附近
-        tolerance: 容許的誤差像素值（預設為 2）
+        Check if player is near end point
+        tolerance: Allowed error in pixels (default: 2)
         """
         if not player_loc:
             return False
@@ -549,42 +547,42 @@ class CocoTaskManager:
         target_x, target_y = 160, 58
         player_x, player_y = player_loc
 
-        # 檢查 X 軸與 Y 軸的距離是否都在誤差範圍內
+        # Check if X and Y distance are both within tolerance
         if abs(player_x - target_x) <= tolerance and abs(player_y - target_y) <= tolerance:
-            print(f"初始化原點 (當前座標: {player_loc})")
+            print(f"Origin reached (current pos: {player_loc})")
             return True
         else:
             return False
 
     def _change_channel(self):
         '''
-        1-60頻道都能用右鍵切換，但是到底之後就沒辦法了
-        所以預設從1頻開始運行，同時開始 count 到60頻道後重置
+        Channels 1-60 can be switched using right arrow, but stops at end.
+        Default begins at channel 1, counts up to 60 then resets.
         '''
         self.channel_count += 1
-        print(f"切換頻道次數: {self.channel_count}")
+        print(f"Channel change count: {self.channel_count}")
 
-        # 按出頻道選單
+        # Open channel menu
         self.action.press_key(Key.esc,0.03)
         time.sleep(0.2)
         self.action.press_key(Key.enter,0.03)
-        # 選擇頻道
+        # Select channel
 
         self.action.press_key(Key.right,0.03)
 
-        # 切換
+        # Switch
         self.action.press_key(Key.enter,0.03)
 
-        time.sleep(2) # 等待換頻道時間
-        # 切換FLAG
+        time.sleep(2) # Wait for channel change
+        # Toggle FLAG
         self.change_flag = False
 
 if __name__ == "__main__":
 
-    # I. 日誌仔入
+    # I. Initialize logging
     logger.setup_logging()
     try:
         run = MaibBot()
         run.run()
     except Exception as e:
-        logging.exception(f"腳本啟動失敗: {e}")
+        logging.exception(f"Script launch failed: {e}")

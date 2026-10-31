@@ -5,8 +5,9 @@ import numpy as np
 import win32gui
 from PIL import ImageGrab
 from src.utils.common import (get_window_handle_and_rect_by,
-bring_to_front_and_center_origin,cent_coord,get_bbox_from_center,draw_dectection_box,BGR2Binary,convert_img2xy
-)
+                              bring_to_front_and_center_origin, cent_coord, get_bbox_from_center, draw_dectection_box,
+                              BGR2Binary, convert_img2xy
+                              )
 from src.engine.MobHunting import MobDetector
 from src.utils.boxes import BBox
 from config.config_loader import config
@@ -20,191 +21,205 @@ import src.action.KeyBoardController as kb
 import time
 import re
 import src.action.HotkeyManager as hk
-import win32con,win32gui
+import win32con, win32gui
 
 '''
-快捷鍵:
-F9:暫停/繼續
-F12:退出離開
+Hotkeys:
+F9:  Pause / Resume
+F12: Exit
 '''
 
-'''遮罩用數值'''
+'''Mask threshold values'''
 LOWER_GREEN = np.array([35, 100, 100], dtype=np.uint8)
 UPPER_GREEN = np.array([85, 255, 255], dtype=np.uint8)
 
-class GameBot:
-    
-    def __init__(self):
-        #---config setting
 
-        #--視窗設定
+class GameBot:
+
+    def __init__(self):
+        # ---config setting
+
+        # -- Window settings
         self.game_title = config.get("game.title")
-        self.hwnd = None # <- 遊戲窗柄容器
-        self.client_window_tl = None # <- 客戶端左上原點，也是偏移量
-        #-- ROI參數
+        self.hwnd = None  # <- Game window handle container
+        self.client_window_tl = None  # <- Client top-left origin (offset)
+        # -- ROI parameters
 
         self.roi_left_offset = config.get("game_bot.roi_x_offset_l_width")
         self.roi_right_offset = config.get("game_bot.roi_x_offset_r_width")
         self.roi_top_offset = config.get("game_bot.roi_y_offset_t_high")
         self.roi_bottom_offset = config.get("game_bot.roi_y_offset_b_high")
-        #-- 繪圖參數
+        # -- Rendering parameters
         self.ACTION_POINT_RANGE = config.get("auto_control_config.ACTION_POINT_RANGE", 1)
 
-        #---角色屬性
+        # --- Character attributes
         self.my_character_template_path = 'img/nametag/MyRoleNameTag.png'
         self.my_character_template = None
         self.my_character_template_size = None
         self.my_character_template_gray = None
         self.mask = None
 
-        #---畫面資料
+        # --- Frame data
         self.frame_bgr = None
         self.roi_crop_frame_gray = None
-        self.frame_size:tuple[int, int] = None # (x,y)typle
+        self.frame_size: tuple[int, int] = None  # (x,y)typle
 
-        #---掃描設定
+        # --- Scan settings
         self.method = cv2.TM_CCOEFF_NORMED
         self.min_threshold = config.get("image_processing.role_min_threshold")
 
-        #---計算資料
-        self.role_BBOX:BBox = None
-        self.roi_BBOX:BBox = None
-        self.role_score = 0  #角色置信度
+        # --- Computed data
+        self.role_BBOX: BBox = None
+        self.roi_BBOX: BBox = None
+        self.role_score = 0  # Character confidence score
         self.player_center_loc = None
-        self.current_mobs_result =None
+        self.current_mobs_result = None
 
-
-        self.prev_pcl = None  # 上一frame的人物位置
-        self.prev_roi_BBOX = None # 上一frame的BBOX
-        self.loss_tracking_count = 0 # 紀錄遺失追蹤次數
-        #---健康參數
+        self.prev_pcl = None  # Player position from previous frame
+        self.prev_roi_BBOX = None  # ROI BBox from previous frame
+        self.loss_tracking_count = 0  # Lost tracking frame count
+        # --- Health parameters
         self.player_hp = None
         self.player_mp = None
 
-        ##--模組實例
+        # -- Module instances
         self.mob_detector = None
         self.player_states = None
         self.health_dectector = None
         self.minimap_detector = None
 
-        #---視窗狀態
-        self.bot_enabled = True # <- bot狀態 True 正常運行; False 迴圈暫停
-        self.is_game_window_foreground_last_frame = True  # <- 記錄「上一輪迴圈」遊戲視窗是否為前景視窗
+        # --- Window state
+        self.bot_enabled = True  # <- Bot state: True normal operation; False loop paused
+        self.is_game_window_foreground_last_frame = True  # <- Record if game window was foreground in previous frame
 
-        #---熟鍵設定
+        # --- Hotkey settings
         self.hotkey_manager = hk.HotkeyManager()
         self.hotkey_manager.register(win32con.VK_F9, self._toggle_bot)
         self.hotkey_manager.register(win32con.VK_F12, self._exit_app)
 
-    #=================
-    # 初始化加載
-    #=================
+    # =================
+    # Initialization & Loading
+    # =================
 
     def _connect_window(self):
         '''
         hook the game window
         '''
-        self.hwnd,self.client_rect =  get_window_handle_and_rect_by(self.game_title)
-        if self.hwnd :
-            logging.info(f"成功讀取遊戲標題: {self.game_title }，視窗句柄: {self.hwnd}")
+        self.hwnd, self.client_rect = get_window_handle_and_rect_by(self.game_title)
+        if self.hwnd:
+            logging.info(f"Successfully loaded game title: {self.game_title}, window handle: {self.hwnd}")
         else:
-            logging.info(f"未匹配到指定窗口{self.game_title }")
+            logging.info(f"Specified window not found: {self.game_title}")
 
     def _load_game_resources(self):
-        """預先載入資源"""       
+        """Preload resources"""
 
-        #樣板載入
-        self.my_character_template = cv2.imread(self.my_character_template_path)
-        self.my_character_template_size =  convert_img2xy(self.my_character_template)
-        self.my_character_template_gray =cv2.cvtColor(self.my_character_template, cv2.COLOR_BGR2GRAY)
+        # Load character nametag template (fallback to example template if not yet captured)
+        import os
+        template_to_load = self.my_character_template_path
+        if not os.path.exists(template_to_load):
+            example_path = config.get('folder_path.template_nametag_path', 'img/nametag/example.png')
+            if os.path.exists(example_path):
+                logging.warning(
+                    f'Template {template_to_load} not found! Falling back to {example_path}. Please run GetNameTag.py '
+                    f'to capture your character nameplate.')
+                template_to_load = example_path
+            else:
+                logging.error(f'Character template not found at {template_to_load} or {example_path}')
 
-        # 製作遮罩
+        self.my_character_template = cv2.imread(template_to_load)
+        if self.my_character_template is None:
+            raise FileNotFoundError(f'Failed to read template image from: {template_to_load}')
+        self.my_character_template_size = convert_img2xy(self.my_character_template)
+        self.my_character_template_gray = cv2.cvtColor(self.my_character_template, cv2.COLOR_BGR2GRAY)
+
+        # Create mask
         my_character_template_hsv = cv2.cvtColor(self.my_character_template, cv2.COLOR_BGR2HSV)
         role_green_mask = cv2.inRange(my_character_template_hsv, LOWER_GREEN, UPPER_GREEN)
         self.mask = cv2.bitwise_not(role_green_mask)
 
-        #模組實例化
+        # Instantiate modules
         self.mob_detector = MobDetector()
         self.action_handler = ActionHandler()
         self.health_dectector = HealthDetector()
         self.auto_control = AutoControl()
         self.minimap_detector = MinimapDetector()
         self.keyboard = kb.KeyBoard()
-        logging.info(f"已載入屬性與實例")
+        logging.info("Attributes and instances loaded")
 
-    #=================
-    # 熟鍵控制
-    #=================
+    # =================
+    # Hotkey Control
+    # =================
 
     def _toggle_bot(self):
         '''
-        功能: 切換bot狀態，預設F9
+        Function: Toggle bot state, default F9
         '''
         try:
             self.bot_enabled = not self.bot_enabled
 
-            # 釋放所有熟鍵
+            # Release all pressed keys
             self.keyboard.release_all()
             self.keyboard.stop_move()
 
-            #這是[Info]層，但因為會被過濾所以放warning
-            logging.warning(f"[Bot 狀態]: {'啟動' if self.bot_enabled else '暫停'}")
+            # Info-level message placed in warning to avoid filter suppression
+            logging.warning(f"[Bot State]: {'Started' if self.bot_enabled else 'Paused'}")
         except Exception as e:
             logging.error(e)
 
     def _exit_app(self):
         '''
-        功能:關掉程式
+        Function: Exit application
         '''
-        logging.info("正在關閉應用程式...")
+        logging.info("Closing application...")
         self.bot_enabled = False
         time.sleep(0.05)
-        # 釋放所有熟鍵
+        # Release all pressed keys
         self.keyboard.release_all()
         time.sleep(0.05)
-        # 銷毀所有 OpenCV 視窗
+        # Destroy all OpenCV windows
         cv2.destroyAllWindows()
-        
-        # 結束整個程式 (可以透過回傳或直接 sys.exit)
+
+        # Terminate process
         import sys
         sys.exit(0)
 
-    #=================
-    # 窗口處理
-    #=================
+    # =================
+    # Window Handling
+    # =================
     def _scan_full_screen(self):
-        '''以窗柄去掃描遊戲畫面'''
+        '''Scan game window screen using window handle'''
         try:
-            #這邊還能優化 以後看到記得改
+            # TODO: Optimize screen capture rect calculation
             client_rect = win32gui.GetClientRect(self.hwnd)
             client_tl = win32gui.ClientToScreen(self.hwnd, (client_rect[0], client_rect[1]))
             client_br = win32gui.ClientToScreen(self.hwnd, (client_rect[2], client_rect[3]))
-            screen_rect  = (client_tl[0], client_tl[1], client_br[0], client_br[1])
+            screen_rect = (client_tl[0], client_tl[1], client_br[0], client_br[1])
             self.client_window_tl = client_tl
         except Exception as e:
-            logging.error(f"screen_loop 發生例外錯誤: {e}", exc_info=True)
+            logging.error(f"Exception occurred in screen_loop: {e}", exc_info=True)
             return None
 
-        #抓圖-轉陣-轉BRG
+        # Capture - to array - to BGR
         current_frame = ImageGrab.grab(bbox=screen_rect)
         current_frame = np.array(current_frame)
-        frame_bgr = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR) #影像處理預設都是BGR
+        frame_bgr = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR)  # Image processing defaults to BGR
 
         if frame_bgr is not None:
             self.frame_bgr = frame_bgr
-            
-            # 記錄畫面尺寸
+
+            # Record frame dimensions
             if self.frame_size is None:
                 y, x = frame_bgr.shape[:2]  # (height, width)
-                self.frame_size = (x ,y)
+                self.frame_size = (x, y)
         return frame_bgr
 
     def _is_window_valid(self):
         if not win32gui.IsWindow(self.hwnd):
-            logging.info("沒有偵測到窗口")
+            logging.info("Window not detected")
             return False
         if win32gui.IsIconic(self.hwnd):
-            logging.info("沒有偵測到窗口")
+            logging.info("Window not detected")
             return False
         rect = win32gui.GetClientRect(self.hwnd)
         if rect[2] < 100 or rect[3] < 100:
@@ -213,16 +228,16 @@ class GameBot:
 
     def _is_game_window_foreground(self):
         '''
-        功能:檢查遊戲視窗目前是否為前景視窗
+        Function: Check if game window is currently the foreground window
         return: bool
         '''
         return win32gui.GetForegroundWindow() == self.hwnd
 
     def _render_cv2_view(self, mini_player_loc, action_states):
         '''
-        功能:統一畫圖
+        Function: Unified rendering
         '''
-        #防呆:沒以下數據拋棄
+        # Guard check: discard if missing required data
 
         self._draw_mob(self.current_mobs_result)
         self._show_player_loc(mini_player_loc)
@@ -234,207 +249,197 @@ class GameBot:
         if self.roi_BBOX:
             self._draw_player_roi_bbox()
         if self.player_center_loc:
-            # 人物判定的中心點
-            cv2.circle(self.frame_bgr, self.player_center_loc, 5, [42,42,165], 3)
+            # Player center point
+            cv2.circle(self.frame_bgr, self.player_center_loc, 5, [42, 42, 165], 3)
         cv2.imshow("Game Debug View", self.frame_bgr)
 
         cv2.waitKey(1)
 
-
-    def _render_minimap_overlay(self,mini_player_loc):
+    def _render_minimap_overlay(self, mini_player_loc):
         '''
-        小地圖渲染
+        Minimap rendering
         '''
-        #防呆:沒資料會導致CTD的，直接攔截
+        # Guard check: intercept missing data to prevent crash
         if self.minimap_detector.crop_frame_bgr is None or mini_player_loc is None:
             return
         overlay = self.minimap_detector.crop_frame_bgr.copy()
         # dx , dy = 8,0
-        for layer in self.auto_control.get_debug_geometry(): # < -  用函式回傳資料封包 + 迴圈unpack巢狀資料
+        for layer in self.auto_control.get_debug_geometry():  # <- Unpack nested geometry data returned by function
             if "boxes" in layer:
                 for top_left, bottom_right in layer["boxes"]:
-                    cv2.rectangle(overlay, top_left, bottom_right, layer["color"], 1) # < - 直接畫圖
+                    cv2.rectangle(overlay, top_left, bottom_right, layer["color"], 1)  # <- Draw directly
             if "circle" in layer:
                 for center in layer["circle"]:
                     cv2.circle(overlay, center, self.ACTION_POINT_RANGE, layer["color"], 1)
 
-        cv2.circle(overlay, (mini_player_loc[0] , mini_player_loc[1]), 3, [255,255,0], 1)
+        cv2.circle(overlay, (mini_player_loc[0], mini_player_loc[1]), 3, [255, 255, 0], 1)
         cv2.imshow("Minimap Debug", overlay)
-
 
     def _setting_cv2_map(self):
         '''
-        預先幫cv2 設立空視窗，可以拉長變形、拖曳窗口
+        Pre-create empty OpenCV windows with adjustable size and position
         '''
         cv2.namedWindow("Minimap Debug", cv2.WINDOW_NORMAL)
         cv2.moveWindow("Minimap Debug", 1500, 0)
 
-        cv2.namedWindow("Game Debug View", cv2.WINDOW_NORMAL)    
+        cv2.namedWindow("Game Debug View", cv2.WINDOW_NORMAL)
         cv2.moveWindow("Game Debug View", 1280, 700)
+
     def run(self):
 
         """#pre_process"""
 
         self._setting_cv2_map()
         self._connect_window()
-        #adjusting display window
+        # adjusting display window
         bring_to_front_and_center_origin(self.hwnd)
         self._load_game_resources()
 
-
-        #process
+        # process
         self.screen_loop()
 
-    #=================
-    # 主控制
-    #=================
+    # =================
+    # Main Control
+    # =================
 
     def screen_loop(self):
         '''
-        全螢幕刷新
-        
+        Full screen refresh loop
         '''
-        
+
         try:
             while True:
-                # 窗口相關處理
-                
-                #若窗口縮小，等待窗口還原
+                # Window handling
+
+                # If window minimized, wait for restore
                 if not self._is_window_valid():
                     time.sleep(1)
                     continue
 
-                # 判斷: 遊戲視窗是否為前景
-                is_game_window_foreground = self._is_game_window_foreground() 
-                if not is_game_window_foreground and self.is_game_window_foreground_last_frame:  # <- 用切出的一瞬間，去做觸發
+                # Check: is game window in foreground
+                is_game_window_foreground = self._is_game_window_foreground()
+                if not is_game_window_foreground and self.is_game_window_foreground_last_frame:  # <- Trigger immediately on window focus loss
                     self.keyboard.release_all()
                     self.keyboard.stop_move()
-                self.is_game_window_foreground_last_frame = is_game_window_foreground  # 更新前景狀態
+                self.is_game_window_foreground_last_frame = is_game_window_foreground  # Update foreground state
 
-                #抓圖函式
+                # Screen capture
                 self.frame_bgr = self._scan_full_screen()
                 '''
                 ==============
-                | 數據收集封包|
+                | Data Packet Collection |
                 ==============
                 '''
-                # 監測熟鍵
-                self.hotkey_manager.poll() 
+                # Poll hotkeys
+                self.hotkey_manager.poll()
 
-                #=============
-                # @biref   暫停狀態
-                # @detail  迴圈暫停有三種情況 1. 視窗縮小 2. 前景不再遊戲，像是可能再點網站 3. 自主控制的暫停迴圈
-                # @note 要放在  self.hotkey_manager.poll()  之後， 因為這行要偵測熟鍵觸發
-                #=============
-                if not self.bot_enabled or not is_game_window_foreground:  # 暫停狀態待命
-                    time.sleep(0.05)  # 避免空轉吃滿CPU
-                    continue  
+                # =============
+                # @brief   Pause state
+                # @detail  Three conditions pause the loop: 1. Window minimized 2. Foreground is not game 3. User paused loop
+                # @note    Must run after self.hotkey_manager.poll() to capture hotkeys
+                # =============
+                if not self.bot_enabled or not is_game_window_foreground:  # Standby during pause
+                    time.sleep(0.05)  # Avoid high CPU usage during idle
+                    continue
 
+                    # start =time.time()
 
-                # start =time.time() 
-
-                # 偵測與更新數據
+                # Detect and update data
                 self.player_tracking_logic()
                 self.HealthDetector()
                 self.current_mobs_result = self.MobDetector()
                 mini_player_loc = self.MinimapDetector()
 
+                # print(f"Template match draw time: {time.time() - start:.3f}")
 
-                # print(f"圖匹配畫圖耗時: {time.time() - start:.3f}")
-
-
-                # 數據封裝
-                current_game_state =  GameState(
-                    player_center_loc = self.player_center_loc,
-                    player_hp = self.player_hp,
-                    player_mp = self.player_mp,
-                    roi_BBOX = self.roi_BBOX,
-                    mobs = self.current_mobs_result,
-                    mini_player_loc = mini_player_loc,
+                # Data encapsulation
+                current_game_state = GameState(
+                    player_center_loc=self.player_center_loc,
+                    player_hp=self.player_hp,
+                    player_mp=self.player_mp,
+                    roi_BBOX=self.roi_BBOX,
+                    mobs=self.current_mobs_result,
+                    mini_player_loc=mini_player_loc,
                 )
 
-                
                 '''
                 decide_operation ,execute_behavior  -> (str, dict{})
                 '''
                 try:
                     action_oder, target_info = self.auto_control.run(current_game_state)
-                    # print(f"行為:{action_oder} 目標:{target_info}")
+                    # print(f"Action: {action_oder} Target: {target_info}")
                 except Exception as e:
-                    logging.error(f"auto_control.run 發生例外錯誤: {e}", exc_info=True)
+                    logging.error(f"Exception occurred in auto_control.run: {e}", exc_info=True)
                     continue
 
-                # print(f"行為:{action_states} 目標:{target_info}")
+                # print(f"Action: {action_states} Target: {target_info}")
 
-
-                #至少有 action_states 才傳輸給狀態機 且 本輪遊戲視窗在前景
+                # Transmit to state machine only when action_oder exists and game is in foreground
                 if action_oder is not None and is_game_window_foreground:
-
                     self.action_handler.execute_behavior(action_oder, target_info)
 
-                #繪製BBOX,Text
+                # Render BBox, Text
                 self._render_cv2_view(mini_player_loc, action_oder)
                 self._render_minimap_overlay(mini_player_loc)
-
 
                 '''
                 ================
                 '''
 
-                #OpenCV 的"Game Debug View"窗口顯示
-                # print(f"一個while循環耗時: {time.time() - start:.3f}")
+                # OpenCV Game Debug View display
+                # print(f"One while loop elapsed: {time.time() - start:.3f}")
         except Exception as e:
-            logging.error(f"screen_loop 發生例外錯誤: {e}", exc_info=True)
+            logging.error(f"Exception occurred in screen_loop: {e}", exc_info=True)
         finally:
             cv2.destroyAllWindows()
 
-    #=================
-    # 人物掃描邏輯
-    #=================
+    # =================
+    # Player Detection Logic
+    # =================
     def player_tracking_logic(self):
         '''
-        功能:
-            控制ROI與全圖掃描邏輯
+        Function:
+            Controls ROI and full screen scanning logic
         '''
         try:
             if self.player_center_loc is None:
-                #全圖掃
+                # Full screen scan
                 player_loc = self._locate_player_globally()
 
-                #防呆
+                # Guard check
                 if player_loc is not None:
-                    self.player_center_loc = cent_coord(player_loc,self.my_character_template_size)
-                    self.loss_tracking_count = 0  # 找到就歸零
+                    self.player_center_loc = cent_coord(player_loc, self.my_character_template_size)
+                    self.loss_tracking_count = 0  # Reset count on detection
                 else:
                     pass
             else:
-                #進入ROI掃
+                # Enter ROI scan
                 fund_result = self._locate_player_locally()
-                        # ROI掃不到時，清空座標與ROI框，讓下一輪回到全局掃描重新定位
-                
+                # If not found in ROI, clear pos and ROI box so next cycle reverts to full scan
+
                 if fund_result:
-                    self.loss_tracking_count = 0  # 找到就歸零
+                    self.loss_tracking_count = 0  # Reset count on detection
 
                 else:
-                    predicted = self._predict_player_position() # <- 嘗試追蹤5次
+                    predicted = self._predict_player_position()  # <- Attempt tracking fallback
                     if not predicted:
-                        # 預測失敗（超過最大容忍幀數），徹底清空
+                        # Prediction failed (exceeded max tolerance frames), fully clear
                         self.player_center_loc = None
                         self.roi_BBOX = None
 
-            # 計算人物的角色bbox，單純用於畫框，不太重要
+            # Compute character bbox for visualization
             if self.player_center_loc is not None:
-                # 角色bbox座標  tuple[tuple[int,int],tuple[int,int]
-                self.role_BBOX = get_bbox_from_center(self.player_center_loc,self.my_character_template_size)
+                # Character bbox coords tuple[tuple[int,int],tuple[int,int]]
+                self.role_BBOX = get_bbox_from_center(self.player_center_loc, self.my_character_template_size)
 
-            
+
             else:
-                # 沒抓到則初始化
+                # Reset if not found
                 self.role_BBOX = None
 
-            #========
-            # 更新每輪資料
-            #=======
+            # ========
+            # Update frame data
+            # =======
             if self.player_center_loc is not None:
                 self.prev_pcl = self.player_center_loc
                 self.prev_role_BBOX = self.role_BBOX
@@ -443,40 +448,39 @@ class GameBot:
 
     def _locate_player_globally(self):
         '''
-        功能:
-            全圖掃描
+        Function:
+            Full screen scan
         return: 
-            匹配目標的原點
+            Origin of matched target
         '''
         try:
             current_frame = cv2.cvtColor(self.frame_bgr, cv2.COLOR_BGR2GRAY)
-            result = cv2.matchTemplate(current_frame,self.my_character_template_gray,self.method,
+            result = cv2.matchTemplate(current_frame, self.my_character_template_gray, self.method,
                                        mask=self.mask)
-            
-            #找到角色
+
+            # Character found
             _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
             if max_val > self.min_threshold:
-                logging.info(f"全圖掃描找到角色，位置:{max_loc},置信度:{max_val}")
+                logging.info(f"Full screen scan found character at {max_loc}, confidence: {max_val}")
                 self.role_score = max_val
                 return max_loc
             else:
-                logging.info(f"全圖模式:未匹配角色")
-                
+                logging.info("Full screen scan: character not matched")
+
         except Exception as e:
             logging.error(e)
 
     def _locate_player_locally(self):
         '''
-        功能:
-            ROI局部掃描
+        Function:
+            Local ROI scan
 
-        return:布林值
-            True:找到
-            False:未找到
-        備註:
-            這裡直接更新 self.player_center_loc、self.role_BBOX 
-
+        return: bool
+            True: Found
+            False: Not found
+        Note:
+            Directly updates self.player_center_loc and self.role_BBOX
         '''
         try:
 
@@ -484,40 +488,40 @@ class GameBot:
             top = max(0, self.player_center_loc[1] - self.roi_top_offset)
             left = max(0, self.player_center_loc[0] - self.roi_left_offset)
             bottom = min(self.frame_size[1], self.player_center_loc[1] + self.roi_bottom_offset)
-            right = min(self.frame_size[0], self.player_center_loc[0]  + self.roi_right_offset)
+            right = min(self.frame_size[0], self.player_center_loc[0] + self.roi_right_offset)
 
-            # 計算ROI範圍
+            # Calculate ROI bounds
             self.roi_BBOX = BBox(left, top, right, bottom)
 
-            #[!]OpenCV 陣列切片強制要求 [y軸範圍, x軸範圍]，小心切錯
+            # [!] OpenCV slice expects [y_range, x_range]
             roi_crop_frame = self.frame_bgr[top:bottom, left:right]
-            self.roi_crop_frame_gray  =  cv2.cvtColor(roi_crop_frame, cv2.COLOR_BGR2GRAY)
-            matches = cv2.matchTemplate(self.roi_crop_frame_gray ,self.my_character_template_gray,
-                                        self.method,mask=self.mask)
+            self.roi_crop_frame_gray = cv2.cvtColor(roi_crop_frame, cv2.COLOR_BGR2GRAY)
+            matches = cv2.matchTemplate(self.roi_crop_frame_gray, self.my_character_template_gray,
+                                        self.method, mask=self.mask)
             _, max_val, _, max_loc = cv2.minMaxLoc(matches)
 
             if max_val > self.min_threshold:
 
-                #相對座標轉全局座標；全局座標= 相對座標x + roi全局座標x, 相對座標y + roi全局座標y 
+                # Local coords to global coords: global = local + roi_origin
                 player_loc_globally = (max_loc[0] + self.roi_BBOX.x1, max_loc[1] + self.roi_BBOX.y1)
 
-                self.player_center_loc = cent_coord(player_loc_globally , self.my_character_template_size)
-                self.role_BBOX = get_bbox_from_center(self.player_center_loc , self.my_character_template_size)
+                self.player_center_loc = cent_coord(player_loc_globally, self.my_character_template_size)
+                self.role_BBOX = get_bbox_from_center(self.player_center_loc, self.my_character_template_size)
 
-                return  True
-            
+                return True
+
             else:
-                logging.info('ROI掃描，未找到角色')
+                logging.info('ROI scan: character not found')
 
-                return False    
+                return False
 
         except Exception as e:
             logging.error(e)
 
     def _predict_player_position(self):
         '''
-        目的:
-            用上一輪位置，處理短暫遺失，與追蹤
+        Purpose:
+            Use previous position to handle brief tracking loss
         '''
         MAX_LOST_FRAMES = 15
 
@@ -528,76 +532,79 @@ class GameBot:
             self.loss_tracking_count += 1
             return True
         else:
-            # 超過容忍次數，計數器歸零
+            # Exceeded tolerance, reset counter
             self.loss_tracking_count = 0
             return False
-        
-    #=================
-    # 偵測器:怪物
-    #=================
+
+    # =================
+    # Detector: Monsters
+    # =================
     def MobDetector(self):
         '''
-        與怪物偵測模組進行互動：傳送當前灰階圖，並取得回傳的怪物封包。
+        Interact with monster detector: send grayscale frame and receive detected monster packet.
         '''
         if self.roi_crop_frame_gray is not None:
-            #push data
+            # push data
 
             mob_results = self.mob_detector.searching_mob(self.roi_crop_frame_gray)
 
             return mob_results
 
-    #=================
-    # 偵測器:健康
-    #=================
+    # =================
+    # Detector: Health
+    # =================
 
     def HealthDetector(self):
         '''
         get:self.player_hp
         '''
         try:
-            #這裡以後若要做補MP偵測，不能這樣寫
-            self.player_hp ,self.player_mp = self.health_dectector.run(self.frame_bgr)
+            # Note: update if MP detection logic changes
+            self.player_hp, self.player_mp = self.health_dectector.run(self.frame_bgr)
 
         except Exception as e:
             logging.error(e)
 
-    #=================
-    # 偵測器:小地圖
-    #=================
-    def MinimapDetector(self)-> tuple[int,int]:
+    # =================
+    # Detector: Minimap
+    # =================
+    def MinimapDetector(self) -> tuple[int, int]:
         '''
         WIP
-        與小圖偵測模組進行互動：傳送當前BGR圖
-        return : 人物位置(x,y)
+        Interact with minimap detector: send current BGR frame
+        return: player position (x, y)
         '''
         mini_player_loc = self.minimap_detector.run(self.frame_bgr)
         return mini_player_loc
-    
-    #=================
-    # 繪製函式
-    #=================
 
-    def _show_player_loc(self,player_loc):
-        
-        cv2.putText(self.frame_bgr, f"人物座標: {player_loc}", org=(10, 250),
+    # =================
+    # Drawing Functions
+    # =================
+
+    def _show_player_loc(self, player_loc):
+
+        cv2.putText(self.frame_bgr, f"Player Pos: {player_loc}", org=(10, 250),
                     fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, color=(255, 0, 0), thickness=2)
 
-    def _show_player_action_states(self,action_state):
-        cv2.putText(self.frame_bgr, f"狀態: {action_state}", org=(10, 300),
+    def _show_player_action_states(self, action_state):
+        cv2.putText(self.frame_bgr, f"State: {action_state}", org=(10, 300),
                     fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, color=(255, 0, 0), thickness=2)
-    def _show_player_HP(self,HP):
-        cv2.putText(self.frame_bgr, f"血量條: {int(HP)}%", org=(10, 350),
+
+    def _show_player_HP(self, HP):
+        cv2.putText(self.frame_bgr, f"HP Bar: {int("50")}%", org=(10, 350),
                     fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, color=(0, 0, 225), thickness=2)
-    def _show_player_MP(self,MP):
-        cv2.putText(self.frame_bgr, f"魔力條: {int(MP)}%", org=(10, 400),
+
+    def _show_player_MP(self, MP):
+        cv2.putText(self.frame_bgr, f"MP Bar: {int("50")}%", org=(10, 400),
                     fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, color=(225, 0, 225), thickness=2)
+
     def _draw_mob(self, mob_results: list):
         """
-        解析怪物封包，然後畫出BBOX
+        Parse monster data and draw bounding boxes
         """
         if mob_results and self.roi_BBOX is not None:
             for mob_name, mob_details in mob_results:
-                
+
                 for detailed in mob_details:
                     x1 = detailed["top_left"][0] + self.roi_BBOX.x1
                     y1 = detailed["top_left"][1] + self.roi_BBOX.y1
@@ -609,33 +616,22 @@ class GameBot:
 
                     draw_dectection_box(
                         self.frame_bgr,
-                        (x1,y1),
-                        (x1+w, y1+h),
-                        label=clean_name,color = (0, 0, 255),
+                        (x1, y1),
+                        (x1 + w, y1 + h),
+                        label=clean_name, color=(0, 0, 255),
                         top_padding=0, bottom_padding=0, left_padding=0, right_padding=0)
+
     def _draw_player(self):
         '''
-        劃出玩家BBOX
+        Draw player bounding box
         '''
-        role_name = f"玩家 {self.role_score:.2f}"
-        draw_dectection_box(self.frame_bgr,self.role_BBOX.top_left,self.role_BBOX.bottom_right,label=role_name,
-                top_padding=80, bottom_padding=0, left_padding=0, right_padding=0,color=(219,112,147))
+        role_name = f"Player {self.role_score:.2f}"
+        draw_dectection_box(self.frame_bgr, self.role_BBOX.top_left, self.role_BBOX.bottom_right, label=role_name,
+                            top_padding=80, bottom_padding=0, left_padding=0, right_padding=0, color=(219, 112, 147))
 
     def _draw_player_roi_bbox(self):
         '''
-        劃出玩家ROI BBOX
+        Draw player ROI bounding box
         '''
-        draw_dectection_box(self.frame_bgr, self.roi_BBOX.top_left, self.roi_BBOX.bottom_right, label="搜索範圍",
-            top_padding=0, bottom_padding=0, left_padding=0, right_padding=0,color=(42,42,165))
-        
-    # def get_client_screen_pos(self):
-    #     '''
-    #     測試用
-    #     窗口內座標轉螢幕座標
-    #     '''
-    #     screen_x, screen_y = win32gui.ClientToScreen(self.hwnd, (0, 0))
-    #     print(f"窗口內座標轉螢幕座標: {screen_x}, {screen_y}")
-
-
-
-
+        draw_dectection_box(self.frame_bgr, self.roi_BBOX.top_left, self.roi_BBOX.bottom_right, label="Search Area",
+                            top_padding=0, bottom_padding=0, left_padding=0, right_padding=0, color=(42, 42, 165))

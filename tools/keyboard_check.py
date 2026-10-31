@@ -1,11 +1,9 @@
 import keyboard
 '''
-測試 keyborad模組中，鍵位的對應名稱
+Inspect corresponding key names in the keyboard module
 '''
 def print_key(event):
     print(event)
 
 keyboard.hook(print_key)
 keyboard.wait()
-
-

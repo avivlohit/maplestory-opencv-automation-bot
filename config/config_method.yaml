@@ -1,8 +1,8 @@
-#怪物匹配過濾器
-# [1] 中心距離閾值過濾器 :pixel_distance_filter [2] 非極大值抑制過濾器 : NMS
+# Monster matching filter
+# [1] Center distance threshold filter : pixel_distance_filter [2] Non-Maximum Suppression filter : NMS
 
 mob_filter_method:
   method : pixel_distance_filter
 
-nms_threshold : 0.4   # (0-1) 數字越高判定越嚴格，怪物越；數字越小，越容易把複數重疊歸納為同一隻
-pix_filter_threshold : 50  #（像素） 中心距離閾值：兩隻怪物中心點小於此距離時，會被視為同一隻怪物的殘影並過濾cls
+nms_threshold : 0.4   # (0-1) Higher number means stricter judgment; lower number merges overlapping boxes into one
+pix_filter_threshold : 50  # (Pixels) Center distance threshold: monsters with center distance less than this are treated as afterimages/duplicates and filtered out
